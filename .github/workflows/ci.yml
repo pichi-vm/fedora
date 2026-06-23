@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  license-headers:
+    name: license headers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: korandoru/hawkeye@v6
+
+  commit-messages:
+    name: commit messages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: pipx run gitlint --commits "origin/${{ github.base_ref || 'main' }}..HEAD"

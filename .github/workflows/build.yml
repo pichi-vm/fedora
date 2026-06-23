@@ -1,0 +1,103 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  RELEASE: "43"
+
+jobs:
+  # Build each arch natively (no QEMU) — public repos get free arm64 runners.
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: fedora:43
+      options: --privileged
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tooling
+        run: dnf install -y mkosi e2fsprogs skopeo cargo git jq
+
+      - name: Install carapace
+        run: cargo install --git https://github.com/pichi-vm/carapace carapace
+
+      - name: Build base carapace (native ${{ matrix.arch }})
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          ./build.sh
+
+      - name: Push per-arch manifest
+        run: |
+          skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+          skopeo copy oci:layout:${RELEASE} \
+            docker://ghcr.io/${{ github.repository }}:${RELEASE}-${{ matrix.arch }}
+
+      - name: Record manifest descriptor
+        run: |
+          mkdir -p desc
+          jq -c '{arch: "${{ matrix.arch }}", digest: .manifests[0].digest, size: .manifests[0].size}' \
+            layout/index.json > desc/${{ matrix.arch }}.json
+          cat desc/${{ matrix.arch }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desc-${{ matrix.arch }}
+          path: desc/${{ matrix.arch }}.json
+
+  # Assemble the per-arch manifests into one OCI image index tagged :43.
+  index:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desc-*
+          merge-multiple: true
+          path: desc
+
+      - name: Install oras + jq
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          ORAS_VERSION=1.2.0
+          curl -fsSL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin oras
+
+      - name: Build + push the multi-arch index
+        run: |
+          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+          # platform.os = "pichi": a carapace is a pichi VM-guest rootfs, not a
+          # thing "used on" an OS — producer and `pichi pull` agree on this token.
+          jq -s '{
+            schemaVersion: 2,
+            mediaType: "application/vnd.oci.image.index.v1+json",
+            annotations: { "org.opencontainers.image.source": "https://github.com/${{ github.repository }}" },
+            manifests: [ .[] | {
+              mediaType: "application/vnd.oci.image.manifest.v1+json",
+              artifactType: "application/vnd.pichi.artifact.v1+json",
+              digest: .digest,
+              size: .size,
+              platform: { os: "pichi", architecture: .arch }
+            } ]
+          }' desc/*.json > index.json
+          cat index.json
+          oras manifest push \
+            --media-type application/vnd.oci.image.index.v1+json \
+            "ghcr.io/${{ github.repository }}:${RELEASE}" \
+            index.json
