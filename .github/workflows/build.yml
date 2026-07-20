@@ -7,6 +7,9 @@ on:
 
 env:
   RELEASE: "43"
+  # arma and pichi are nightly-only (artifact deps / `-Z bindeps`); arma
+  # cross-compiles the tatu firmware to bare-metal targets. Pin the toolchain.
+  NIGHTLY: "nightly-2026-07-06"
 
 jobs:
   # Build each arch natively (no QEMU) — public repos get free arm64 runners.
@@ -22,6 +25,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container:
       image: fedora:43
+      # --privileged: mkosi + `unshare -r` (the rootfs strip / mkfs) need
+      # user namespaces and full device access.
       options: --privileged
     permissions:
       contents: read
@@ -29,16 +34,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build tooling
-        run: dnf install -y mkosi e2fsprogs cargo git jq
+      - name: Install system tooling
+        run: >-
+          dnf install -y
+          mkosi e2fsprogs util-linux coreutils
+          git jq gcc curl openssl-devel pkgconf-pkg-config perl
 
-      - name: Install pichi
-        run: cargo install --git https://github.com/pichi-vm/pichi pichi
-
-      - name: Build base carapace (native ${{ matrix.arch }})
+      - name: Install Rust (${{ env.NIGHTLY }} + bare-metal targets)
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          ./build.sh
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
+            -y --profile minimal --default-toolchain "$NIGHTLY" \
+            --target x86_64-unknown-none --target aarch64-unknown-none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Build arma + pichi from main (nightly, -Z bindeps)
+        run: |
+          # Built in-repo so each crate's rust-toolchain.toml / .cargo/config
+          # (bindeps, targets) apply automatically. carapace is installed by
+          # build.sh itself.
+          git clone --depth 1 https://github.com/pichi-vm/arma /tmp/arma
+          (cd /tmp/arma && cargo build --release --bin arma)
+          echo "ARMA=/tmp/arma/target/release/arma" >> "$GITHUB_ENV"
+          git clone --depth 1 https://github.com/pichi-vm/pichi /tmp/pichi
+          (cd /tmp/pichi && cargo build --release --bin pichi)
+          install -m755 /tmp/pichi/target/release/pichi /usr/local/bin/pichi
+
+      - name: Build combined base OS image (native ${{ matrix.arch }})
+        run: ./build.sh
 
       - name: Authenticate to ghcr.io
         run: |
@@ -49,7 +71,6 @@ jobs:
 
       - name: Push per-arch manifest + record descriptor
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
           mkdir -p desc
           pichi push "fedora:${RELEASE}" \
             "ghcr.io/${{ github.repository }}:${RELEASE}-${{ matrix.arch }}" \
@@ -77,10 +98,12 @@ jobs:
           merge-multiple: true
           path: desc
 
-      - name: Install pichi + jq
+      - name: Install pichi
         run: |
-          sudo apt-get update && sudo apt-get install -y jq
-          cargo install --git https://github.com/pichi-vm/pichi pichi
+          rustup toolchain install "$NIGHTLY" --profile minimal
+          git clone --depth 1 https://github.com/pichi-vm/pichi /tmp/pichi
+          (cd /tmp/pichi && cargo "+$NIGHTLY" build --release --bin pichi)
+          sudo install -m755 /tmp/pichi/target/release/pichi /usr/local/bin/pichi
 
       - name: Authenticate to ghcr.io
         run: |
@@ -91,7 +114,6 @@ jobs:
 
       - name: Assemble + push the multi-arch index
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
           # platform.os = "pichi": a carapace is a pichi VM-guest rootfs, not a
           # thing "used on" an OS — producer and `pichi pull` agree on this token.
           entries=()
