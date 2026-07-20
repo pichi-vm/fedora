@@ -30,28 +30,33 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install build tooling
-        run: dnf install -y mkosi e2fsprogs skopeo cargo git jq
+        run: dnf install -y mkosi e2fsprogs cargo git jq
 
-      - name: Install carapace
-        run: cargo install --git https://github.com/pichi-vm/carapace carapace
+      - name: Install pichi
+        run: cargo install --git https://github.com/pichi-vm/pichi pichi
 
       - name: Build base carapace (native ${{ matrix.arch }})
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
           ./build.sh
 
-      - name: Push per-arch manifest
+      - name: Authenticate to ghcr.io
         run: |
-          skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
-          skopeo copy oci:layout:${RELEASE} \
-            docker://ghcr.io/${{ github.repository }}:${RELEASE}-${{ matrix.arch }}
+          mkdir -p "$HOME/.docker"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' \
+            "$(printf '%s:%s' "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" | base64 -w0)" \
+            > "$HOME/.docker/config.json"
 
-      - name: Record manifest descriptor
+      - name: Push per-arch manifest + record descriptor
         run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
           mkdir -p desc
-          jq -c '{arch: "${{ matrix.arch }}", digest: .manifests[0].digest, size: .manifests[0].size}' \
-            layout/index.json > desc/${{ matrix.arch }}.json
-          cat desc/${{ matrix.arch }}.json
+          pichi push "fedora:${RELEASE}" \
+            "ghcr.io/${{ github.repository }}:${RELEASE}-${{ matrix.arch }}" \
+            --print-descriptor \
+            | jq -c '. + {arch: "${{ matrix.arch }}"}' \
+            > "desc/${{ matrix.arch }}.json"
+          cat "desc/${{ matrix.arch }}.json"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -72,32 +77,27 @@ jobs:
           merge-multiple: true
           path: desc
 
-      - name: Install oras + jq
+      - name: Install pichi + jq
         run: |
           sudo apt-get update && sudo apt-get install -y jq
-          ORAS_VERSION=1.2.0
-          curl -fsSL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin oras
+          cargo install --git https://github.com/pichi-vm/pichi pichi
 
-      - name: Build + push the multi-arch index
+      - name: Authenticate to ghcr.io
         run: |
-          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<<"${{ secrets.GITHUB_TOKEN }}"
+          mkdir -p "$HOME/.docker"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' \
+            "$(printf '%s:%s' "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" | base64 -w0)" \
+            > "$HOME/.docker/config.json"
+
+      - name: Assemble + push the multi-arch index
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
           # platform.os = "pichi": a carapace is a pichi VM-guest rootfs, not a
           # thing "used on" an OS — producer and `pichi pull` agree on this token.
-          jq -s '{
-            schemaVersion: 2,
-            mediaType: "application/vnd.oci.image.index.v1+json",
-            annotations: { "org.opencontainers.image.source": "https://github.com/${{ github.repository }}" },
-            manifests: [ .[] | {
-              mediaType: "application/vnd.oci.image.manifest.v1+json",
-              artifactType: "application/vnd.pichi.artifact.v1+json",
-              digest: .digest,
-              size: .size,
-              platform: { os: "pichi", architecture: .arch }
-            } ]
-          }' desc/*.json > index.json
-          cat index.json
-          oras manifest push \
-            --media-type application/vnd.oci.image.index.v1+json \
-            "ghcr.io/${{ github.repository }}:${RELEASE}" \
-            index.json
+          entries=()
+          for f in desc/*.json; do
+            entries+=(--entry "$(jq -r '.arch + "," + .digest + "," + (.size|tostring)' "$f")")
+          done
+          pichi push-index "ghcr.io/${{ github.repository }}:${RELEASE}" \
+            --source "https://github.com/${{ github.repository }}" \
+            "${entries[@]}"

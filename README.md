@@ -1,21 +1,33 @@
 # pichi-vm/fedora
 
-CI-built **Fedora base carapace** for the pichi ecosystem — a generic `from:`
-for `pichi build` and the project's tests.
+CI-built **Fedora combined base OS image** for the pichi ecosystem — a single
+pichi artifact that both serves as a `from:` base and boots directly with
+`pichi run`.
 
-This is a *pure distro* base: a truly-minimal Fedora rootfs, no pichi or corium
-content. It is packaged as a [carapace](https://github.com/pichi-vm/carapace)
-OCI artifact and published to `ghcr.io/pichi-vm/fedora`. corium and any
-app/kernel-builder tooling are layered on top at `pichi build` time, so this
-repo depends only on **carapace + mkosi + skopeo** — never on pichi.
+The artifact bundles all four pieces of the [`dt`](https://github.com/pichi-vm/pmi)
+combined-image format: the **carapace** (scutes — the Fedora rootfs), a
+**detached base DTB**, a **detached-mode PMI** (kernel + a systemd initramfs),
+and the launch **config**. Boot is native systemd: the PMI's initramfs runs
+carapace's systemd generator, which assembles `/dev/mapper/root` from
+`carapacehash=` on the (measured) command line, and systemd pivots into the
+Fedora rootfs. A *temporary* boot-test unit then powers off with a console
+marker so the full chain is verifiable.
+
+One kernel version underpins the PMI's `vmlinuz`, the initramfs modules, and the
+carapace's `/usr/lib/modules` — all from one mkosi build. `/boot` and the kernel
+image are boot payload (the PMI's domain) and are stripped from the carapace.
 
 ## How it's built
 
-1. `mkosi` produces a minimal Fedora rootfs directory (`mkosi.conf`).
-2. `mkfs.ext4 -d` packs it into a bare ext4 image.
-3. `carapace import` converts that into a carapace OCI image layout.
-4. `skopeo copy` pushes each per-arch layout to `:43-<arch>`, and `oras`
-   assembles them into a multi-arch OCI **image index** tagged `:43`.
+1. `mkosi` produces the Fedora rootfs with `systemd` + the kernel (`mkosi.conf`).
+2. `vmlinuz` is extracted and a matching systemd initramfs is built via mkosi's
+   `mkosi-initrd`, pinned to the same kernel, with the carapace binary +
+   generator and `dm-snapshot` added (`initrd/`).
+3. `/boot` and the kernel image are stripped; `mkfs.ext4 -d` packs the carapace.
+4. `arma build … --dtb` seals the detached PMI + base DTB with
+   `carapacehash=<top>` on the cmdline.
+5. `pichi import … --pmi --dtb --config` packages the combined artifact;
+   `pichi push` / `pichi push-index` publish the multi-arch index.
 
 ## Multi-arch
 

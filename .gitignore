@@ -1,4 +1,7 @@
-/rootfs
-/mkosi.output
+# Build artifacts
+/.build/
+/rootfs/
 /fedora.raw
-/layout
+# Staged at build time by build.sh (carapace binary + generator symlink)
+/initrd/mkosi.extra/
+/mkosi.output/

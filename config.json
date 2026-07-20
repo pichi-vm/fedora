@@ -1,0 +1,6 @@
+{
+  "requirements": {
+    "cpus": { "required": 1, "recommended": 2 },
+    "memory": { "required": 1073741824, "recommended": 2147483648 }
+  }
+}
