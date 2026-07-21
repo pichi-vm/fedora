@@ -13,6 +13,9 @@ env:
 
 jobs:
   # Build each arch natively (no QEMU) — public repos get free arm64 runners.
+  # Each build exports its image as an OCI layout directory and uploads it; no
+  # arch pushes to the registry directly. The index job loads both and pushes
+  # everything atomically (podman `manifest push --all` semantics).
   build:
     strategy:
       fail-fast: false
@@ -30,7 +33,6 @@ jobs:
       options: --privileged
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -62,23 +64,17 @@ jobs:
       - name: Build combined base OS image (native ${{ matrix.arch }})
         run: ./build.sh
 
-      - name: Authenticate to ghcr.io
-        run: |
-          mkdir -p "$HOME/.docker"
-          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' \
-            "$(printf '%s:%s' "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" | base64 -w0)" \
-            > "$HOME/.docker/config.json"
+      - name: Export image as an OCI layout directory
+        run: pichi save "fedora:${RELEASE}" -o "oci-${{ matrix.arch }}"
 
-      # docker-style single-image publish: tag the local build as the per-arch
-      # registry ref, then push it.
-      - name: Push per-arch image
-        run: |
-          ref="ghcr.io/${{ github.repository }}:${RELEASE}-${{ matrix.arch }}"
-          pichi tag "fedora:${RELEASE}" "$ref"
-          pichi push "$ref"
+      - name: Upload OCI layout artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-${{ matrix.arch }}
+          path: oci-${{ matrix.arch }}
 
-  # Assemble the per-arch images into one multi-arch OCI image index tagged :43,
-  # mirroring `docker manifest create/annotate/push`.
+  # Load every per-arch OCI layout, assemble one multi-arch OCI image index
+  # tagged :43, and push it atomically (blobs + arch manifests + the index).
   index:
     needs: build
     runs-on: ubuntu-latest
@@ -93,6 +89,11 @@ jobs:
           (cd /tmp/pichi && cargo "+$NIGHTLY" build --release --bin pichi)
           sudo install -m755 /tmp/pichi/target/release/pichi /usr/local/bin/pichi
 
+      - name: Download OCI layout artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: oci-*
+
       - name: Authenticate to ghcr.io
         run: |
           mkdir -p "$HOME/.docker"
@@ -100,13 +101,16 @@ jobs:
             "$(printf '%s:%s' "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" | base64 -w0)" \
             > "$HOME/.docker/config.json"
 
-      - name: Assemble + push the multi-arch index
+      - name: Load, assemble, and push the multi-arch index
         run: |
-          list="ghcr.io/${{ github.repository }}:${RELEASE}"
+          # Load each arch under a distinct local tag so `manifest create` can
+          # reference both from the local cache (no registry round-trip).
+          pichi load "oci-amd64" --tag "fedora:${RELEASE}-amd64"
+          pichi load "oci-arm64" --tag "fedora:${RELEASE}-arm64"
+          list="fedora:${RELEASE}"
           # platform.os = "pichi": a carapace is a pichi VM-guest rootfs, not a
           # thing "used on" an OS — producer and `pichi pull` agree on this token.
-          pichi manifest create "$list" \
-            "${list}-amd64" "${list}-arm64"
+          pichi manifest create "$list" "${list}-amd64" "${list}-arm64"
           pichi manifest annotate "$list" "${list}-amd64" --os pichi --arch amd64
           pichi manifest annotate "$list" "${list}-arm64" --os pichi --arch arm64
-          pichi manifest push "$list"
+          pichi manifest push "$list" "ghcr.io/${{ github.repository }}:${RELEASE}"
