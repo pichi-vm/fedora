@@ -69,22 +69,16 @@ jobs:
             "$(printf '%s:%s' "${{ github.actor }}" "${{ secrets.GITHUB_TOKEN }}" | base64 -w0)" \
             > "$HOME/.docker/config.json"
 
-      - name: Push per-arch manifest + record descriptor
+      # docker-style single-image publish: tag the local build as the per-arch
+      # registry ref, then push it.
+      - name: Push per-arch image
         run: |
-          mkdir -p desc
-          pichi push "fedora:${RELEASE}" \
-            "ghcr.io/${{ github.repository }}:${RELEASE}-${{ matrix.arch }}" \
-            --print-descriptor \
-            | jq -c '. + {arch: "${{ matrix.arch }}"}' \
-            > "desc/${{ matrix.arch }}.json"
-          cat "desc/${{ matrix.arch }}.json"
+          ref="ghcr.io/${{ github.repository }}:${RELEASE}-${{ matrix.arch }}"
+          pichi tag "fedora:${RELEASE}" "$ref"
+          pichi push "$ref"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: desc-${{ matrix.arch }}
-          path: desc/${{ matrix.arch }}.json
-
-  # Assemble the per-arch manifests into one OCI image index tagged :43.
+  # Assemble the per-arch images into one multi-arch OCI image index tagged :43,
+  # mirroring `docker manifest create/annotate/push`.
   index:
     needs: build
     runs-on: ubuntu-latest
@@ -92,12 +86,6 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: desc-*
-          merge-multiple: true
-          path: desc
-
       - name: Install pichi
         run: |
           rustup toolchain install "$NIGHTLY" --profile minimal
@@ -114,12 +102,11 @@ jobs:
 
       - name: Assemble + push the multi-arch index
         run: |
+          list="ghcr.io/${{ github.repository }}:${RELEASE}"
           # platform.os = "pichi": a carapace is a pichi VM-guest rootfs, not a
           # thing "used on" an OS — producer and `pichi pull` agree on this token.
-          entries=()
-          for f in desc/*.json; do
-            entries+=(--entry "$(jq -r '.arch + "," + .digest + "," + (.size|tostring)' "$f")")
-          done
-          pichi push-index "ghcr.io/${{ github.repository }}:${RELEASE}" \
-            --source "https://github.com/${{ github.repository }}" \
-            "${entries[@]}"
+          pichi manifest create "$list" \
+            "${list}-amd64" "${list}-arm64"
+          pichi manifest annotate "$list" "${list}-amd64" --os pichi --arch amd64
+          pichi manifest annotate "$list" "${list}-arm64" --os pichi --arch arm64
+          pichi manifest push "$list"
