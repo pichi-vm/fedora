@@ -1,0 +1,26 @@
+#!/bin/sh
+# SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runs against the built rootfs tree before mkosi.repart/ packs it into ext4.
+# Two jobs, both formerly done by build.sh's `unshare -r` block (mkosi already
+# runs this privileged in its own user namespace, so no manual root mapping):
+#
+#   1. copy the kernel image + config out to $OUTPUTDIR for the PMI (arma reads
+#      them via --kernel / --config);
+#   2. strip /boot and the in-tree vmlinuz/System.map — boot payload is the
+#      PMI's domain, the carapace keeps only the .ko module tree.
+#
+# The single kernel version is discovered here (the sole /usr/lib/modules entry
+# from `kernel-core`), not string-parsed in build.sh.
+set -eu
+
+kver=$(basename "$BUILDROOT"/usr/lib/modules/*/)
+
+cp "$BUILDROOT/usr/lib/modules/$kver/vmlinuz" "$OUTPUTDIR/vmlinuz"
+cp "$BUILDROOT/usr/lib/modules/$kver/config"  "$OUTPUTDIR/kernel.config"
+printf '%s\n' "$kver" > "$OUTPUTDIR/kver"   # build.sh cross-checks the initrd
+
+rm -rf "$BUILDROOT/boot"
+rm -f  "$BUILDROOT/usr/lib/modules/$kver/vmlinuz" \
+       "$BUILDROOT/usr/lib/modules/$kver/System.map"

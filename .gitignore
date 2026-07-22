@@ -1,7 +1,5 @@
-# Build artifacts
+# Build artifacts (everything mkosi + build.sh emit lands under .build/)
 /.build/
-/rootfs/
-/fedora.raw
-# Staged at build time by build.sh (carapace binary + generator symlink)
-/initrd/mkosi.extra/
 /mkosi.output/
+# Staged at build time by build.sh (carapace binary + generator symlink)
+/mkosi.images/initrd/mkosi.extra/

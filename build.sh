@@ -9,17 +9,21 @@
 # pivots into the Fedora rootfs. A temporary boot-test unit then powers off with
 # a console marker so the boot is verifiable.
 #
-# One kernel version underpins all three module consumers (PMI vmlinuz,
-# initramfs modules, carapace /usr/lib/modules): the rootfs build installs the
-# kernel and the initrd build is pinned to that exact version.
+# ONE mkosi run produces everything the PMI and carapace need:
+#   * the Fedora rootfs, packed by mkosi.repart/ into a bare ext4 root partition
+#     emitted as <output>.root.raw (SplitArtifacts=partitions, no GPT);
+#   * the matching systemd initramfs (mkosi.images/initrd/ subimage);
+#   * vmlinuz + kernel config, copied out by mkosi.finalize.
+# The subimage shares this run's package snapshot, so its kernel matches the
+# rootfs by construction — one kernel version underpins the PMI vmlinuz, the
+# initramfs modules, and the carapace /usr/lib/modules. build.sh cross-checks it.
 #
-# Requires: mkosi, pichi, arma (ARMA=<path> or on PATH), jq, mkfs.ext4,
-# truncate, cargo. Runs rootless (mkosi uses user namespaces).
+# Requires: mkosi, pichi, arma (ARMA=<path> or on PATH), cpio, dumpe2fs
+# (e2fsprogs), cargo. Runs rootless (mkosi uses user namespaces).
 set -euo pipefail
 
 RELEASE="${RELEASE:-43}"
 IMAGE="${IMAGE:-ghcr.io/pichi-vm/fedora}"
-SIZE="${SIZE:-2G}"
 ARMA="${ARMA:-arma}"
 CARAPACE_GIT="${CARAPACE_GIT:-https://github.com/pichi-vm/carapace}"
 
@@ -32,55 +36,66 @@ work="$here/.build"
 rm -rf "$work"
 mkdir -p "$work"
 
-# ---- 1. rootfs (the single kernel source) --------------------------------
-# Installs kernel-core + systemd + the temporary boot-test unit (mkosi.extra).
-mkosi --force --output-dir "$work"
-
-KVER="$(basename "$(ls -d "$work"/rootfs/usr/lib/modules/*/ | head -1)")"
-echo ">>> kernel $KVER"
-
-# ---- 2. stage the carapace binary + generator symlink for the initrd -----
+# ---- 1. stage the carapace binary + generator symlink for the initrd -----
 # The in-binary systemd generator turns `carapacehash=` into the attach unit.
+# mkosi copies the subimage's mkosi.extra/ into the initramfs verbatim.
 cargo install --git "$CARAPACE_GIT" --root "$work/carapace" --quiet carapace
-ext="$here/initrd/mkosi.extra"
+ext="$here/mkosi.images/initrd/mkosi.extra"
 rm -rf "$ext"
 mkdir -p "$ext/usr/bin" "$ext/usr/lib/systemd/system-generators"
 cp "$work/carapace/bin/carapace" "$ext/usr/bin/carapace"
 ln -sf ../../../bin/carapace "$ext/usr/lib/systemd/system-generators/systemd-carapace-generator"
 
-# ---- 3. matching initramfs (pinned to the rootfs kernel) ------------------
-mkosi -C initrd --force --output-dir "$work" \
-	--package "kernel-core-$KVER"
+# ---- 2. build rootfs + initrd + kernel in one mkosi run ------------------
+mkosi --force --output-dir "$work"
 
-# ---- 4. extract the kernel, strip boot payload, pack the carapace --------
-# Run as namespace-root (`unshare -r` maps us to uid 0): the rootfs carries
-# root-owned, unreadable files (e.g. /etc/shadow) and read-only directories
-# that a plain user can neither read for mkfs nor remove. We own the tree, so
-# the mapping grants full access without real privilege.
-#   - extract vmlinuz for the PMI, then drop it and /boot from the carapace
-#     (the kernel image is the PMI's domain; the carapace keeps only .ko);
-#   - pack the result into a bare ext4 image (4096-byte = carapace verity block).
-unshare -r bash -eu -c '
-	work="$1"; kver="$2"; size="$3"
-	export PATH="/usr/sbin:/sbin:$PATH"
-	cp "$work/rootfs/usr/lib/modules/$kver/vmlinuz" "$work/vmlinuz"
-	cp "$work/rootfs/usr/lib/modules/$kver/config" "$work/kernel.config"
-	rm -rf "$work/rootfs/boot"
-	rm -f "$work/rootfs/usr/lib/modules/$kver/vmlinuz" \
-		"$work/rootfs/usr/lib/modules/$kver/System.map"
-	rm -f "$work/fedora.raw"
-	truncate -s "$size" "$work/fedora.raw"
-	mkfs.ext4 -q -F -b 4096 -d "$work/rootfs" "$work/fedora.raw"
-' _ "$work" "$KVER" "$SIZE"
+# Resolve the split artifacts. mkosi drops the main image's outputs and every
+# subimage's output into --output-dir; the root partition is written as
+# <output>.root.raw by SplitArtifacts=partitions. Fail with a listing rather
+# than a cryptic "no such file" if a name ever shifts.
+find_one() {
+	local desc="$1" f; shift
+	for f in "$@"; do [ -e "$f" ] && { printf '%s' "$f"; return; }; done
+	echo "!!! could not find $desc in $work; mkosi produced:" >&2
+	ls -1 "$work" >&2
+	exit 1
+}
+# repart names the split partition after its label: <output>.root-<arch>.raw
+# (e.g. fedora.root-x86-64.raw) — NOT the full-disk fedora.raw.
+root="$(find_one 'root ext4 partition' "$work"/*.root-*.raw "$work"/*.root.raw)"
+initrd="$(find_one 'initrd' "$work"/initrd.cpio "$work/initrd" "$work"/*initrd*.cpio)"
+kver="$(cat "$work/kver")"
+echo ">>> kernel $kver  root $(basename "$root")  initrd $(basename "$initrd")"
 
-# ---- 5. carapace top root hash (the trust anchor for the cmdline) ---------
-# A carapace-only import prints the verity info; capture rootₙ₋₁.
-hash="$(pichi import "$work/fedora.raw" "fedora:$RELEASE-tmp" \
-	--quiet --print-verity-info | jq -r .root_hash)"
-pichi rmi "fedora:$RELEASE-tmp" >/dev/null 2>&1 || true
-echo ">>> carapace root $hash"
+# Guard the subimage/rootfs kernel match: the uncompressed initrd's module tree
+# must be the same NEVRA as the rootfs kernel (see mkosi.images/initrd note).
+# `sort -u` (not `head`) drains cpio fully: a truncating consumer would
+# SIGPIPE cpio, and `set -o pipefail` would abort the script on that.
+initrd_kver="$(cpio -t < "$initrd" 2>/dev/null \
+	| sed -n 's#^\(\./\)\?usr/lib/modules/\([^/]*\)/.*#\2#p' | sort -u | head -n1)"
+if [ "$initrd_kver" != "$kver" ]; then
+	echo "!!! initrd kernel ($initrd_kver) != rootfs kernel ($kver)" >&2
+	exit 1
+fi
 
-# ---- 6. detached-mode PMI + base DTB -------------------------------------
+# Sanity-check the carapace verity block size (4096B) on the emitted ext4.
+bs="$(dumpe2fs -h "$root" 2>/dev/null | sed -n 's/^Block size: *//p')"
+[ "$bs" = "4096" ] || { echo "!!! root ext4 block size $bs != 4096" >&2; exit 1; }
+
+# ---- 3. import the carapace once; read its top root hash ------------------
+# `import raw` caches the carapace and, thanks to sparse SEEK_HOLE handling,
+# ingests the large mostly-empty ext4 in O(content). It's tagged as the reusable
+# base carapace and reused via `--carapace` in step 5, so the carapace is
+# imported ONCE (no throwaway import). The dm-verity top hash — arma's
+# `carapacehash=` trust anchor — is a manifest annotation, read via `inspect`
+# (which needs a resolvable ref, hence the tag rather than the bare digest).
+carapace="fedora:$RELEASE-carapace"
+pichi import raw "$root" -t "$carapace" --quiet
+hash="$(pichi inspect "$carapace" \
+	--format '{{ manifest.annotations["dev.pichi.carapace.verity.hash"] }}')"
+echo ">>> carapace $carapace  root $hash"
+
+# ---- 4. detached-mode PMI + base DTB -------------------------------------
 # Cmdline notes (this is still a boot-test image, see pichi-boot-test.service):
 #   carapacehash=       trust anchor consumed by the carapace generator.
 #   console=hvc0        the virtio-console; dillo surfaces it to the host.
@@ -92,16 +107,20 @@ echo ">>> carapace root $hash"
 "$ARMA" build \
 	--kernel "$work/vmlinuz" \
 	--config "$work/kernel.config" \
-	--initrd "$work/initrd" \
+	--initrd "$initrd" \
 	--cmdline "root=/dev/mapper/root carapacehash=$hash console=hvc0 systemd.volatile=state systemd.unit=multi-user.target" \
 	--dtb "$work/base.dtb" \
 	"$work/boot.pmi"
 
-# ---- 7. package the combined artifact ------------------------------------
-pichi import "$work/fedora.raw" "fedora:$RELEASE" \
-	--pmi "$work/boot.pmi" \
+# ---- 5. combine PMI + DTB + config onto the carapace ---------------------
+# `import pmi --carapace <ref>` reuses the already-cached carapace's scutes
+# (read-only) and layers the boot payload on, producing the combined bootable
+# artifact tagged fedora:$RELEASE.
+pichi import pmi "$work/boot.pmi" \
 	--dtb "$work/base.dtb" \
-	--config "$here/config.json"
+	--config "$here/config.json" \
+	--carapace "$carapace" \
+	-t "fedora:$RELEASE"
 
 echo ">>> imported combined artifact fedora:$RELEASE (carapace + dtb + pmi + config)"
 echo "    boot-test: pichi run fedora:$RELEASE  # expect PICHI-CARAPACE-BOOT-OK then clean poweroff"

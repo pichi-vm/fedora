@@ -39,8 +39,8 @@ jobs:
       - name: Install system tooling
         run: >-
           dnf install -y
-          mkosi e2fsprogs util-linux coreutils
-          git jq gcc curl openssl-devel pkgconf-pkg-config perl
+          mkosi systemd-standalone-repart e2fsprogs util-linux coreutils cpio
+          git gcc curl openssl-devel pkgconf-pkg-config perl
 
       - name: Install Rust (${{ env.NIGHTLY }} + bare-metal targets)
         run: |
