@@ -6,12 +6,14 @@ pichi artifact that both serves as a `from:` base and boots directly with
 
 The artifact bundles all four pieces of the [`dt`](https://github.com/pichi-vm/pmi)
 combined-image format: the **carapace** (scutes — the Fedora rootfs), a
-**detached base DTB**, a **detached-mode PMI** (kernel + a systemd initramfs),
-and the launch **config**. Boot is native systemd: the PMI's initramfs runs
-carapace's systemd generator, which assembles `/dev/mapper/root` from
-`carapacehash=` on the (measured) command line, and systemd pivots into the
-Fedora rootfs. A *temporary* boot-test unit then powers off with a console
-marker so the full chain is verifiable.
+**detached base DTB**, a **detached-mode PMI** (kernel + a tiny custom
+initramfs), and the launch **config**. The initramfs is a single **static
+`carapace` binary as `/init`** plus the handful of kernel modules the distro
+kernel doesn't build in — no systemd, no udev. As PID1 it mounts the API
+filesystems, loads those modules, reads `carapacehash=` from the (measured)
+command line, assembles `/dev/mapper/root`, and `switch_root`s into the Fedora
+rootfs (where systemd is the real init). A *temporary* boot-test unit then
+powers off with a console marker so the full chain is verifiable.
 
 One kernel version underpins the PMI's `vmlinuz`, the initramfs modules, and the
 carapace's `/usr/lib/modules` — all from **one mkosi run**. `/boot` and the
@@ -20,30 +22,30 @@ carapace.
 
 ## How it's built
 
-A single `mkosi` invocation does all the OS work; then `arma` seals the PMI and
-`pichi import` packages the artifact ([`build.sh`](build.sh)):
+One `mkosi` run builds the rootfs; `build.sh` then assembles the tiny custom
+initramfs, `arma` seals the PMI, and `pichi import` packages the artifact
+([`build.sh`](build.sh)):
 
 ```
 mkosi ──▶ import raw ──▶ arma build ──▶ import pmi
+              (static carapace init + .ko → initrd.cpio)
 ```
 
-1. **`mkosi`** builds the whole OS in one run (`mkosi.conf` + `mkosi.images/`):
-   - the Fedora rootfs (`systemd` + `kernel-core`);
-   - the matching systemd initramfs as a **subimage** (`mkosi.images/initrd/`,
-     pulled in via `Dependencies=`) — `mkosi-initrd` plus `dm-snapshot` and the
-     staged carapace binary + generator, output uncompressed (arma rejects
-     compressed initrds). Sharing the run's package snapshot, its kernel matches
-     the rootfs by construction — no version is hand-plumbed;
-   - `mkosi.finalize` copies `vmlinuz` + the kernel config out and strips
-     `/boot` and the in-tree kernel image;
+1. **`mkosi`** builds the Fedora rootfs (`systemd` + `kernel-core`), then:
+   - `mkosi.finalize` copies `vmlinuz` + kernel config out, **exports the
+     initramfs module set** (the carapace-boot pivot modules that aren't builtin,
+     + deps — ~just `dm-verity` on a stock Fedora kernel) to `initrd-mods/`, and
+     strips `/boot` and the in-tree kernel image;
    - `mkosi.repart/` packs the stripped tree into a single **bare ext4 root**
-     partition, emitted as `fedora.root.raw` (`SplitArtifacts=partitions`, no
-     GPT). The filesystem is sized to the carapace's fixed apparent root-device
-     length (**64 GiB**, carapace `ZERO_COUNT_SECTORS`) so the guest root fills
-     the device with no wasted space; because `pichi import raw` walks the image
-     sparsely (`SEEK_HOLE`) and drops zero blocks, that size costs nothing in
-     the stored artifact — the scute is proportional to real content, not fs
-     size.
+     partition, emitted as `fedora.root-<arch>.raw` (`SplitArtifacts=partitions`,
+     no GPT). The filesystem is sized to the carapace's fixed apparent
+     root-device length (**64 GiB**, carapace `ZERO_COUNT_SECTORS`); because
+     `pichi import raw` walks the image sparsely (`SEEK_HOLE`) and drops zero
+     blocks, that size costs nothing in the stored artifact — the scute is
+     proportional to real content, not fs size;
+   - `build.sh` builds a **static (musl) `carapace`** and cpios it as `/init`
+     together with the exported `.ko` → a ~1 MB uncompressed initramfs (arma
+     rejects compressed initrds). No systemd/udev in the initramfs.
 2. **`pichi import raw`** ingests that ext4 as a base **carapace** (tagged
    `fedora:<release>-carapace`, a reusable `from:` base) and exposes its
    dm-verity top hash as a manifest annotation. The carapace is imported

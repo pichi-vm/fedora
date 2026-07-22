@@ -1,5 +1,3 @@
 # Build artifacts (everything mkosi + build.sh emit lands under .build/)
 /.build/
 /mkosi.output/
-# Staged at build time by build.sh (carapace binary + generator symlink)
-/mkosi.images/initrd/mkosi.extra/
