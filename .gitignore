@@ -1,3 +1,4 @@
 # Build artifacts (everything mkosi + build.sh emit lands under .build/)
 /.build/
 /mkosi.output/
+/_karpathy-loop/
