@@ -104,14 +104,22 @@ echo ">>> carapace $carapace  root $hash"
 # Cmdline notes (this is still a boot-test image, see pichi-boot-test.service):
 #   carapacehash=       trust anchor read by the carapace init (PID1).
 #   console=hvc0        the virtio-console; dillo surfaces it to the host.
+#   carapace.timing     boot-test scaffolding: opt in to the carapace init's
+#                       switch_root timing marker (off by default). Remove with
+#                       pichi-boot-test.service when real workloads run.
 #   systemd.*           apply to the REAL init (systemd in the rootfs, post-
 #                       switch_root): volatile /var (the carapace root is
 #                       read-only), headless multi-user, quiet console status.
+# Slot inference (from --config) now emits a PCIe bridge and no virtio-mmio
+# slots for this kernel: virtio_pci is builtin (works from the first
+# instruction, carries the early console) while virtio-mmio is a module we
+# neither ship nor need, so arma correctly omits the empty mmio transport
+# slots the guest would otherwise probe and reject at boot.
 "$ARMA" build \
 	--kernel "$work/vmlinuz" \
 	--config "$work/kernel.config" \
 	--initrd "$initrd" \
-	--cmdline "root=/dev/mapper/root carapacehash=$hash console=hvc0 systemd.volatile=state systemd.unit=multi-user.target systemd.show_status=false" \
+	--cmdline "root=/dev/mapper/root carapacehash=$hash console=hvc0 carapace.timing systemd.volatile=state systemd.unit=multi-user.target systemd.show_status=false" \
 	--dtb "$work/base.dtb" \
 	"$work/boot.pmi"
 
