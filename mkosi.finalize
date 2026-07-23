@@ -33,10 +33,14 @@ with open(f"{outdir}/kver", "w") as f:
     f.write(kver + "\n")
 
 # ---- 2. export the initramfs module set (pivot set + dep closure) --------
-# Names carapace-init needs to reach and mount the root. Members that the
-# kernel builds in are simply absent from modules.dep and skipped.
+# Only what carapace-init needs to reach and mount the root carapace: the
+# virtio transport + disk + console, the dm stack, and ext4. Members the kernel
+# builds in are absent from modules.dep and skipped. No networking — nothing
+# before switch_root uses it, and virtio_net would drag in net_failover/failover
+# and cost failed-then-retried module loads; the running OS still loads
+# virtio_net from its own (unstripped) rootfs module tree.
 PIVOT = [
-    "virtio_pci", "virtio_blk", "virtio_console", "virtio_net",
+    "virtio_pci", "virtio_blk", "virtio_console",
     "dm-mod", "dm-snapshot", "dm-verity", "ext4",
 ]
 
