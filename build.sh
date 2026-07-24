@@ -124,10 +124,19 @@ echo ">>> carapace $carapace  root $hash"
 	"$work/boot.pmi"
 
 # ---- 6. combine PMI + DTB + config onto the carapace ---------------------
+# Stamp OCI provenance annotations onto the artifact manifest (pichi carries
+# them verbatim; structural verity keys can't be overridden). revision comes
+# from git when available (CI checks out the repo), else "unknown".
+rev="$(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)"
 pichi import pmi "$work/boot.pmi" \
 	--dtb "$work/base.dtb" \
 	--config "$here/config.json" \
 	--carapace "$carapace" \
+	-a "org.opencontainers.image.source=https://github.com/pichi-vm/fedora" \
+	-a "org.opencontainers.image.revision=$rev" \
+	-a "org.opencontainers.image.version=$RELEASE" \
+	-a "org.opencontainers.image.title=Fedora $RELEASE" \
+	-a "org.opencontainers.image.description=Fedora $RELEASE base OS carapace for pichi" \
 	-t "fedora:$RELEASE"
 
 echo ">>> imported combined artifact fedora:$RELEASE (carapace + dtb + pmi + config)"
