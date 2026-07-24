@@ -110,7 +110,13 @@ jobs:
           list="fedora:${RELEASE}"
           # platform.os = "pichi": a carapace is a pichi VM-guest rootfs, not a
           # thing "used on" an OS — producer and `pichi pull` agree on this token.
-          pichi manifest create "$list" "${list}-amd64" "${list}-arm64"
+          # Stamp index-level provenance (whole multi-arch image); `created` is
+          # added automatically.
+          pichi manifest create "$list" "${list}-amd64" "${list}-arm64" \
+            -a "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            -a "org.opencontainers.image.revision=${{ github.sha }}" \
+            -a "org.opencontainers.image.version=${RELEASE}" \
+            -a "org.opencontainers.image.description=Fedora ${RELEASE} base OS carapace for pichi"
           pichi manifest annotate "$list" "${list}-amd64" --os pichi --arch amd64
           pichi manifest annotate "$list" "${list}-arm64" --os pichi --arch arm64
           pichi manifest push "$list" "ghcr.io/${{ github.repository }}:${RELEASE}"
