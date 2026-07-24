@@ -62,6 +62,10 @@ jobs:
           install -m755 /tmp/pichi/target/release/pichi /usr/local/bin/pichi
 
       - name: Build combined base OS image (native ${{ matrix.arch }})
+        # REVISION reaches build.sh's provenance stamp: git rev-parse isn't
+        # reliable in this checkout, so pass the SHA explicitly.
+        env:
+          REVISION: ${{ github.sha }}
         run: ./build.sh
 
       - name: Export image as an OCI layout directory
@@ -116,6 +120,7 @@ jobs:
             -a "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             -a "org.opencontainers.image.revision=${{ github.sha }}" \
             -a "org.opencontainers.image.version=${RELEASE}" \
+            -a "org.opencontainers.image.title=Fedora ${RELEASE}" \
             -a "org.opencontainers.image.description=Fedora ${RELEASE} base OS carapace for pichi"
           pichi manifest annotate "$list" "${list}-amd64" --os pichi --arch amd64
           pichi manifest annotate "$list" "${list}-arm64" --os pichi --arch arm64

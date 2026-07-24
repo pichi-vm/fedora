@@ -125,9 +125,9 @@ echo ">>> carapace $carapace  root $hash"
 
 # ---- 6. combine PMI + DTB + config onto the carapace ---------------------
 # Stamp OCI provenance annotations onto the artifact manifest (pichi carries
-# them verbatim; structural verity keys can't be overridden). revision comes
-# from git when available (CI checks out the repo), else "unknown".
-rev="$(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)"
+# them verbatim; structural verity keys can't be overridden). revision prefers
+# an explicit $REVISION (set by CI), falling back to git, then "unknown".
+rev="${REVISION:-$(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)}"
 pichi import pmi "$work/boot.pmi" \
 	--dtb "$work/base.dtb" \
 	--config "$here/config.json" \
