@@ -7,8 +7,8 @@
 # config. `pichi run` boots it: the PMI's initramfs is a single static `carapace`
 # binary as init — it loads the shipped modules, reads `carapacehash=`, assembles
 # /dev/mapper/root, and switch_roots into the Fedora rootfs. No systemd or udev
-# in the initramfs. A temporary boot-test unit then powers off with a console
-# marker so the boot is verifiable.
+# in the initramfs. The result is a general-purpose base: it boots to
+# multi-user.target with a console login, for other images to build on.
 #
 # ONE mkosi run builds the rootfs carapace and exports what the PMI needs;
 # build.sh then assembles the tiny custom initramfs:
@@ -101,15 +101,14 @@ hash="$(pichi inspect "$carapace" \
 echo ">>> carapace $carapace  root $hash"
 
 # ---- 5. detached-mode PMI + base DTB -------------------------------------
-# Cmdline notes (this is still a boot-test image, see pichi-boot-test.service):
+# Cmdline notes:
 #   carapacehash=       trust anchor read by the carapace init (PID1).
 #   console=hvc0        the virtio-console; dillo surfaces it to the host.
-#   carapace.timing     boot-test scaffolding: opt in to the carapace init's
-#                       switch_root timing marker (off by default). Remove with
-#                       pichi-boot-test.service when real workloads run.
 #   systemd.*           apply to the REAL init (systemd in the rootfs, post-
-#                       switch_root): volatile /var (the carapace root is
-#                       read-only), headless multi-user, quiet console status.
+#                       switch_root): volatile /var (REQUIRED — the carapace
+#                       root is read-only; a derivative with a data volume
+#                       overrides it), multi-user with a console getty, quiet
+#                       console status.
 # Slot inference (from --config) now emits a PCIe bridge and no virtio-mmio
 # slots for this kernel: virtio_pci is builtin (works from the first
 # instruction, carries the early console) while virtio-mmio is a module we
@@ -119,7 +118,7 @@ echo ">>> carapace $carapace  root $hash"
 	--kernel "$work/vmlinuz" \
 	--config "$work/kernel.config" \
 	--initrd "$initrd" \
-	--cmdline "root=/dev/mapper/root carapacehash=$hash console=hvc0 carapace.timing systemd.volatile=state systemd.unit=multi-user.target systemd.show_status=false" \
+	--cmdline "root=/dev/mapper/root carapacehash=$hash console=hvc0 systemd.volatile=state systemd.unit=multi-user.target systemd.show_status=false" \
 	--dtb "$work/base.dtb" \
 	"$work/boot.pmi"
 
@@ -140,5 +139,5 @@ pichi import pmi "$work/boot.pmi" \
 	-t "fedora:$RELEASE"
 
 echo ">>> imported combined artifact fedora:$RELEASE (carapace + dtb + pmi + config)"
-echo "    boot-test: pichi run fedora:$RELEASE  # expect PICHI-CARAPACE-BOOT-OK then clean poweroff"
-echo "    push with: pichi push fedora:$RELEASE $IMAGE:$RELEASE-<arch>"
+echo "    run:  pichi run fedora:$RELEASE  # boots to a console login (multi-user)"
+echo "    push: pichi push fedora:$RELEASE $IMAGE:$RELEASE-<arch>"

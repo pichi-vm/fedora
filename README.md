@@ -12,8 +12,9 @@ initramfs), and the launch **config**. The initramfs is a single **static
 kernel doesn't build in — no systemd, no udev. As PID1 it mounts the API
 filesystems, loads those modules, reads `carapacehash=` from the (measured)
 command line, assembles `/dev/mapper/root`, and `switch_root`s into the Fedora
-rootfs (where systemd is the real init). A *temporary* boot-test unit then
-powers off with a console marker so the full chain is verifiable.
+rootfs (where systemd is the real init). The result is a general-purpose base
+image that boots to `multi-user.target` with a console login, for other pichi
+images to build on.
 
 One kernel version underpins the PMI's `vmlinuz`, the initramfs modules, and the
 carapace's `/usr/lib/modules` — all from **one mkosi run**. `/boot` and the
