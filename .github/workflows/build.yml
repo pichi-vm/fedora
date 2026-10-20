@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -47,12 +47,13 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
             -y --profile minimal --default-toolchain "$NIGHTLY" \
             --target x86_64-unknown-none --target aarch64-unknown-none
+          "$HOME/.cargo/bin/rustup" toolchain install stable --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
       - name: Build arma + pichi from main (nightly, -Z bindeps)
         run: |
           # Built in-repo so each crate's rust-toolchain.toml / .cargo/config
-          # (bindeps, targets) apply automatically. carapace is installed by
+          # (bindeps, targets) apply automatically. Corium is installed by
           # build.sh itself.
           git clone --depth 1 https://github.com/pichi-vm/arma /tmp/arma
           (cd /tmp/arma && cargo build --release --bin arma)
@@ -68,6 +69,47 @@ jobs:
           REVISION: ${{ github.sha }}
         run: ./build.sh
 
+      - name: Validate image-builder regression tests
+        run: |
+          python3 -m unittest discover -s tests -v
+          bash -n build.sh
+
+      - name: Build native VM launcher
+        if: matrix.arch == 'amd64'
+        run: |
+          git clone --depth 1 https://github.com/pichi-vm/dillo /tmp/dillo
+          (cd /tmp/dillo && cargo build --locked --release --bin dillo)
+          echo "PICHI_DILLO=/tmp/dillo/target/release/dillo" >> "$GITHUB_ENV"
+
+      - name: Reserve guest hugepages on the disposable runner
+        if: matrix.arch == 'amd64'
+        run: |
+          # Dillo requires 2 MiB hugepages. config.json recommends 2048 MiB.
+          test -r /dev/kvm && test -w /dev/kvm
+          want=1024
+          for attempt in 1 2 3 4 5 6; do
+            pages=$(cat /proc/sys/vm/nr_hugepages)
+            if [ "$pages" -ge "$want" ]; then break; fi
+            sync
+            echo 3 > /proc/sys/vm/drop_caches
+            echo 1 > /proc/sys/vm/compact_memory
+            echo "$want" > /proc/sys/vm/nr_hugepages
+            sleep 3
+          done
+          test "$(cat /proc/sys/vm/nr_hugepages)" -ge "$want"
+
+      - name: Verify Fedora handoff and integrity-root contract
+        if: matrix.arch == 'amd64'
+        run: python3 tests/boot.py --release "$RELEASE"
+
+      - name: Upload VM boot evidence
+        if: always() && matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-evidence-amd64
+          path: .build/boot-tests-*
+          if-no-files-found: warn
+
       - name: Export image as an OCI layout directory
         run: pichi save "fedora:${RELEASE}" -o "oci-${{ matrix.arch }}"
 
@@ -80,6 +122,8 @@ jobs:
   # Load every per-arch OCI layout, assemble one multi-arch OCI image index
   # tagged :43, and push it atomically (blobs + arch manifests + the index).
   index:
+    # Feature branches and PRs validate both architectures without publishing.
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:
