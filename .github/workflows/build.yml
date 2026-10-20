@@ -108,6 +108,7 @@ jobs:
         with:
           name: boot-evidence-amd64
           path: .build/boot-tests-*
+          include-hidden-files: true
           if-no-files-found: warn
 
       - name: Export image as an OCI layout directory
