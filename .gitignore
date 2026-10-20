@@ -2,3 +2,4 @@
 /.build/
 /mkosi.output/
 /_karpathy-loop/
+__pycache__/

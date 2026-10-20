@@ -4,9 +4,10 @@
 
 # Build the Fedora combined base OS image — a single pichi artifact carrying the
 # carapace (scutes) + a detached base DTB + a detached-mode PMI + the launch
-# config. `pichi run` boots it: the PMI's initramfs is a single static `carapace`
-# binary as init — it loads the shipped modules, reads `carapacehash=`, assembles
-# /dev/mapper/root, and switch_roots into the Fedora rootfs. No systemd or udev
+# config. `pichi run` boots it: the PMI's initramfs is a single static `corium`
+# binary as init — it loads the shipped modules, reads `corium=`, discovers the
+# scutes on GPT partitions, mounts the root read-only and executes /sbin/init.
+# Corium requires Linux 7.0+ for the initramfs pivot. No systemd or udev
 # in the initramfs. The result is a general-purpose base: it boots to
 # multi-user.target with a console login, for other images to build on.
 #
@@ -16,7 +17,7 @@
 #     <output>.root-<arch>.raw (SplitArtifacts=partitions, no GPT);
 #   * mkosi.finalize copies out vmlinuz + kernel config + kver, and exports the
 #     initramfs module set (pivot modules not builtin, + deps) to initrd-mods/;
-#   * the initramfs = static `carapace` (musl) as /init + those .ko, cpio'd here.
+#   * the initramfs = static `corium` (musl) as /init + those .ko, cpio'd here.
 # One kernel version underpins the PMI vmlinuz, the initramfs modules, and the
 # carapace /usr/lib/modules — all from the single mkosi build.
 #
@@ -27,7 +28,10 @@ set -euo pipefail
 RELEASE="${RELEASE:-43}"
 IMAGE="${IMAGE:-ghcr.io/pichi-vm/fedora}"
 ARMA="${ARMA:-arma}"
-CARAPACE_GIT="${CARAPACE_GIT:-https://github.com/pichi-vm/carapace}"
+CORIUM_GIT="${CORIUM_GIT:-https://github.com/pichi-vm/corium}"
+# Corium 0.2: Linux 7+, corium=<hash>, GPT discovery and /sbin/init handoff.
+CORIUM_REV="${CORIUM_REV:-b1d2d24a8db9cf845c79a3cabc7cdd5dd6f0a275}"
+CORIUM_TOOLCHAIN="${CORIUM_TOOLCHAIN:-stable}"
 
 case "$(uname -m)" in
 	x86_64)  MUSL=x86_64-unknown-linux-musl ;;
@@ -44,21 +48,22 @@ work="$here/.build"
 rm -rf "$work"
 mkdir -p "$work"
 
-# ---- 1. build the static carapace init binary ----------------------------
+# ---- 1. build the static Corium init binary ------------------------------
 # The initramfs is just this one static (musl) binary as /init — it is PID1:
-# mount, load modules, assemble the carapace, switch_root. No libc/systemd/udev
-# needed in the initramfs. CARAPACE_BIN=<path> supplies a prebuilt static binary
-# (dev/CI hook, like ARMA=); otherwise build it from CARAPACE_GIT.
-if [ -n "${CARAPACE_BIN:-}" ]; then
-	carapace_bin="$CARAPACE_BIN"
+# mount, load modules, discover/assemble the carapace, pivot, exec /sbin/init.
+# CORIUM_BIN=<path> supplies a prebuilt static binary for the native arch
+# (dev/CI hook, like ARMA=); otherwise build the pinned source with its lockfile.
+if [ -n "${CORIUM_BIN:-}" ]; then
+	corium_bin="$CORIUM_BIN"
 else
-	rustup target add "$MUSL" >/dev/null 2>&1 || true
-	cargo install --git "$CARAPACE_GIT" --target "$MUSL" --root "$work/carapace" --quiet carapace
-	carapace_bin="$work/carapace/bin/carapace"
+	rustup target add --toolchain "$CORIUM_TOOLCHAIN" "$MUSL"
+	cargo "+$CORIUM_TOOLCHAIN" install --locked --git "$CORIUM_GIT" --rev "$CORIUM_REV" \
+		--target "$MUSL" --root "$work/corium" --quiet corium
+	corium_bin="$work/corium/bin/corium"
 fi
 
 # ---- 2. build the rootfs carapace in one mkosi run -----------------------
-mkosi --force --output-dir "$work"
+mkosi --force --release "$RELEASE" --output-dir "$work"
 
 # Resolve the split artifacts (fail with a listing rather than a cryptic error).
 find_one() {
@@ -83,7 +88,7 @@ bs="$(dumpe2fs -h "$root" 2>/dev/null | sed -n 's/^Block size: *//p')"
 # cpio builds rootless. Uncompressed newc (arma rejects compressed initrds).
 stage="$work/initrd-root"
 rm -rf "$stage"; mkdir -p "$stage"
-install -m0755 "$carapace_bin" "$stage/init"
+install -m0755 "$corium_bin" "$stage/init"
 [ -d "$work/initrd-mods" ] && cp -a "$work/initrd-mods/." "$stage/"
 ( cd "$stage" && find . -print0 | cpio --null --create --format=newc --quiet ) > "$work/initrd.cpio"
 initrd="$work/initrd.cpio"
@@ -92,20 +97,24 @@ echo ">>> initrd $(du -h "$initrd" | cut -f1)  modules: $(find "$stage" -name '*
 # ---- 4. import the carapace once; read its top root hash ------------------
 # `import raw` caches the carapace (sparse SEEK_HOLE ingest, O(content)), tagged
 # as the reusable base and reused via `--carapace` in step 6 (imported ONCE). The
-# dm-verity top hash — the `carapacehash=` trust anchor — is a manifest
+# dm-verity top hash — the `corium=` trust anchor — is a manifest
 # annotation, read via `inspect`.
 carapace="fedora:$RELEASE-carapace"
 pichi import raw "$root" -t "$carapace" --quiet
 hash="$(pichi inspect "$carapace" \
 	--format '{{ manifest.annotations["dev.pichi.carapace.verity.hash"] }}')"
+# The manifest contract is SHA-256. Never seal an empty/malformed trust anchor.
+[[ "$hash" =~ ^[[:xdigit:]]{64}$ ]] || { echo "!!! invalid carapace verity root: $hash" >&2; exit 1; }
 echo ">>> carapace $carapace  root $hash"
 
 # ---- 5. detached-mode PMI + base DTB -------------------------------------
 # Cmdline notes:
-#   carapacehash=       trust anchor read by the carapace init (PID1).
+#   corium=             trusted chain root read by Corium (PID1). pichi run
+#                       exposes scute COW/verity GPT partitions; Corium discovers
+#                       them by PARTUUID. No fixed /dev/mapper/root or root=.
 #   console=hvc0        the virtio-console; dillo surfaces it to the host.
 #   systemd.*           apply to the REAL init (systemd in the rootfs, post-
-#                       switch_root): volatile /var (REQUIRED — the carapace
+#                       pivot): volatile /var (REQUIRED — the carapace
 #                       root is read-only; a derivative with a data volume
 #                       overrides it), multi-user with a console getty, quiet
 #                       console status.
@@ -114,11 +123,13 @@ echo ">>> carapace $carapace  root $hash"
 # instruction, carries the early console) while virtio-mmio is a module we
 # neither ship nor need, so arma correctly omits the empty mmio transport
 # slots the guest would otherwise probe and reject at boot.
+cmdline="corium=$hash console=hvc0 systemd.volatile=state systemd.unit=multi-user.target systemd.show_status=false"
+printf '%s\n' "$cmdline" > "$work/cmdline"
 "$ARMA" build \
 	--kernel "$work/vmlinuz" \
 	--config "$work/kernel.config" \
 	--initrd "$initrd" \
-	--cmdline "root=/dev/mapper/root carapacehash=$hash console=hvc0 systemd.volatile=state systemd.unit=multi-user.target systemd.show_status=false" \
+	--cmdline "$cmdline" \
 	--dtb "$work/base.dtb" \
 	"$work/boot.pmi"
 
