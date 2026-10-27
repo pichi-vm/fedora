@@ -1,0 +1,35 @@
+name: checks
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+# Cheap tier. ci.yml waits on this whole workflow before the image matrix,
+# so a red regression, header, or commit-message check skips that build.
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: image-builder regression tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -v
+      - run: bash -n build.sh
+
+  license-headers:
+    name: license headers
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: korandoru/hawkeye@v6
+
+  commit-messages:
+    name: commit messages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: pipx run gitlint --commits "origin/${{ github.base_ref || 'main' }}..HEAD"
