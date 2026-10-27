@@ -1,8 +1,9 @@
 name: build
 
 on:
-  push:
-  pull_request:
+  # Called from ci.yml after Tier-1 checks. Manual dispatch remains
+  # available; push and pull_request do not start this workflow directly.
+  workflow_call:
   workflow_dispatch:
 
 env:
