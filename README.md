@@ -41,11 +41,12 @@ mkosi ──▶ import raw ──▶ arma build ──▶ import pmi
      strips `/boot` and the in-tree kernel image;
    - `mkosi.repart/` packs the stripped tree into a single **bare ext4 root**
      partition, emitted as `fedora.root-<arch>.raw` (`SplitArtifacts=partitions`,
-     no GPT). The filesystem is sized to the carapace's fixed apparent
-     root-device length (**64 GiB**, carapace `ZERO_COUNT_SECTORS`); because
-     `pichi import raw` walks the image sparsely (`SEEK_HOLE`) and drops zero
-     blocks, that size costs nothing in the stored artifact — the scute is
-     proportional to real content, not fs size;
+     no GPT). Fedora chooses a **64 GiB** filesystem to give guests room to
+     grow. The Carapace device is much larger and does not constrain this size;
+     its extra sectors are unused tail. Because `pichi import raw` walks the
+     image sparsely (`SEEK_HOLE`) and drops zero blocks, that size costs almost
+     nothing in the stored artifact — the scute is proportional to real
+     content, not fs size;
    - `build.sh` builds a **static (musl) `corium`** and cpios it as `/init`
      together with the exported `.ko` into an uncompressed initramfs (arma
      rejects compressed initrds). No systemd/udev in the initramfs.
@@ -91,10 +92,12 @@ provides the COW and verity blobs as GPT partitions through dillo; their
 PARTUUIDs are derived from the trusted chain root. Corium discovers these
 partitions and uses Carapace for validation and storage assembly. Carapace
 remains the storage format/library; it is no longer the initramfs entrypoint.
-The 64 GiB filesystem size is still Carapace's storage geometry, not a fixed
-device name. The builder supplies `/dev`, `/proc`, `/sys`, `/run`, and the
-executable `/sbin/init` in the root. Corium does not carry API mounts into it;
-systemd owns subsequent setup, including volatile `/var` on this read-only base.
+Fedora chooses the 64 GiB filesystem size; it is sparse, costs almost nothing
+to store, and gives guests room to grow. The Carapace device is much larger
+and does not constrain this choice. The builder supplies `/dev`, `/proc`,
+`/sys`, `/run`, and the executable `/sbin/init` in the root. Corium does not
+carry API mounts into it; systemd owns subsequent setup, including volatile
+`/var` on this read-only base.
 
 Local build prerequisites are listed in `build.sh`; Corium uses stable Rust
 (1.89+), separate from arma/pichi's nightly toolchain. Run:
