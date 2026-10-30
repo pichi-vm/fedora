@@ -72,7 +72,8 @@ artifact). `platform.architecture` is the conventional OCI/GOARCH `amd64`/`arm64
 
 See [`build.sh`](build.sh) for the local equivalent and
 [`.github/workflows/build.yml`](.github/workflows/build.yml) for CI. Builds run
-on pushes and pull requests; registry publication is restricted to `main`.
+on pushes to `main`, pull requests, and manual dispatch; registry publication
+is restricted to `main`.
 
 ## Boot contract and local verification
 
