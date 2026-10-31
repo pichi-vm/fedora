@@ -79,7 +79,7 @@ jobs:
         if: matrix.arch == 'amd64'
         run: |
           git clone --depth 1 https://github.com/pichi-vm/dillo /tmp/dillo
-          (cd /tmp/dillo && cargo build --locked --release --bin dillo)
+          (cd /tmp/dillo && cargo build -Z bindeps --locked --release --bin dillo)
           echo "PICHI_DILLO=/tmp/dillo/target/release/dillo" >> "$GITHUB_ENV"
 
       - name: Reserve guest hugepages on the disposable runner
