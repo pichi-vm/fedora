@@ -116,9 +116,9 @@ isolated fixtures and tool doubles. They are not boot tests. CI runs them in
 addition to native combined-artifact builds for amd64 and arm64, license-header
 checks and gitlint. A successful build alone does not prove VM handoff.
 
-On a native Linux/KVM host with a current dillo supporting embedded DTBs and
-a pre-provisioned pool of 2 MiB hugepages sufficient for the configured guest
-RAM (2048 MiB recommended by `config.json`):
+On a native Linux/KVM host with a current dillo on PATH supporting embedded
+DTBs and a pre-provisioned pool of 2 MiB hugepages sufficient for the configured
+guest RAM (2048 MiB recommended by `config.json`):
 
 ```sh
 # PICHI_DILLO can select a current launcher instead of pichi's sibling binary.

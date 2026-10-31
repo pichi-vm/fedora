@@ -1,0 +1,105 @@
+name: packages
+
+on: pull_request
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+
+jobs:
+  select:
+    runs-on: ubuntu-24.04
+    outputs:
+      projects: ${{ steps.select.outputs.projects }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - id: select
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changes=$(git diff --name-only --no-renames "$BASE...$HEAD")
+          projects=()
+          for project in corium arma dillo pichi; do
+            if grep -qE "^(packaging/$project/|scripts/|\.copr/|\.gitmodules$|\.github/workflows/packages\.yml$)" <<< "$changes"; then
+              projects+=("$project")
+            fi
+          done
+          printf '%s\n' "${projects[@]}" | python3 -c 'import json,sys; print("projects=" + json.dumps(sys.stdin.read().split()))' >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: select
+    if: needs.select.outputs.projects != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.select.outputs.projects) }}
+        release: ['43', '44', '45', rawhide]
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: registry.fedoraproject.org/fedora:${{ matrix.release }}
+      options: --privileged
+    steps:
+      - name: Install preparation tools
+        run: dnf install -y git make
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Trust the checkout for subsequent Git commands
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build source packages
+        env:
+          PROJECT: ${{ matrix.project }}
+        run: |
+          projects="$PROJECT"
+          # Pichi requires dillo-vm at install time; build its RPM in this job.
+          if [ "$PROJECT" = pichi ]; then projects="dillo pichi"; fi
+          for project in $projects; do
+            make -f .copr/Makefile srpm \
+              spec="$GITHUB_WORKSPACE/packaging/$project/$project.spec" \
+              outdir="$GITHUB_WORKSPACE/srpm-out/$project"
+          done
+      - name: Install RPM build tools
+        run: |
+          dnf install -y dnf5-plugins cargo-rpm-macros gcc-c++ cmake make lld rust cargo
+          case "$(uname -m)" in
+            x86_64) target=x86_64-unknown-none ;;
+            aarch64) target=aarch64-unknown-none-softfloat ;;
+          esac
+          dnf install -y "rust-std-static-$target"
+      - name: Rebuild without network and install
+        run: |
+          for srpm in srpm-out/*/*.src.rpm; do
+            dnf builddep -y "$srpm"
+            unshare --net rpmbuild --rebuild "$srpm" \
+              --define "_topdir $GITHUB_WORKSPACE/rpmbuild-out"
+          done
+          dnf install -y rpmbuild-out/RPMS/*/*.rpm
+
+  packages:
+    needs: [select, build]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          SELECT: ${{ needs.select.result }}
+          BUILD: ${{ needs.build.result }}
+          PROJECTS: ${{ needs.select.outputs.projects }}
+        run: |
+          test "$SELECT" = success
+          if [ "$PROJECTS" = '[]' ]; then
+            test "$BUILD" = skipped
+          else
+            test "$BUILD" = success
+          fi
