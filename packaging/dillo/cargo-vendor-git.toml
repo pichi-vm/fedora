@@ -1,0 +1,20 @@
+# Git source replacements for the pinned Cargo.lock.
+# scripts/srpm.py checks these against cargo vendor output.
+
+[source."git+https://github.com/pichi-vm/arma?rev=b792e9a3463f65c821cfa4f15c3d2b6a6b5e2a94"]
+git = "https://github.com/pichi-vm/arma"
+rev = "b792e9a3463f65c821cfa4f15c3d2b6a6b5e2a94"
+replace-with = "vendored-sources"
+
+[source."git+https://github.com/pichi-vm/burrow"]
+git = "https://github.com/pichi-vm/burrow"
+replace-with = "vendored-sources"
+
+[source."git+https://github.com/pichi-vm/devtree"]
+git = "https://github.com/pichi-vm/devtree"
+replace-with = "vendored-sources"
+
+[source."git+https://github.com/pichi-vm/pmi?rev=2b922270cd81bba763ea781f3eb5ff238f037c97"]
+git = "https://github.com/pichi-vm/pmi"
+rev = "2b922270cd81bba763ea781f3eb5ff238f037c97"
+replace-with = "vendored-sources"

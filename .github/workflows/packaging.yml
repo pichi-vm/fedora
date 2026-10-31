@@ -1,0 +1,124 @@
+name: packaging
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - packaging/**
+      - scripts/**
+      - tests/test_versions.py
+      - tests/test_packaging.py
+      - .copr/**
+      - .gitmodules
+      - .github/workflows/packaging.yml
+  pull_request:
+    paths:
+      - packaging/**
+      - scripts/**
+      - tests/test_versions.py
+      - tests/test_packaging.py
+      - .copr/**
+      - .gitmodules
+      - .github/workflows/packaging.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+
+jobs:
+  ledger:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 -m unittest discover -s tests -v
+      - name: Check package versions and shared inputs
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          python3 scripts/versions.py --base "$BASE"
+
+  srpm:
+    needs: ledger
+    runs-on: ubuntu-24.04
+    container: fedora:43
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [corium, arma, dillo, pichi]
+    steps:
+      - name: Install preparation tools
+        run: dnf install -y git curl gcc python3 rpm-build patch tar xz gzip
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install source preparation toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
+            -y --profile minimal --default-toolchain nightly-2026-07-06
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Build source package
+        run: python3 scripts/srpm.py ${{ matrix.project }} --out "$RUNNER_TEMP/srpm"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: srpm-${{ matrix.project }}
+          path: |
+            ${{ runner.temp }}/srpm/*.src.rpm
+            ${{ runner.temp }}/srpm/*-provenance.json
+          if-no-files-found: error
+
+  rpm:
+    needs: srpm
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ['43', '44', '45', rawhide]
+        arch: [x86_64, aarch64]
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: fedora:${{ matrix.release }}
+      options: --privileged
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: srpm-*
+          path: srpms
+          merge-multiple: true
+      - name: Install RPM build tools
+        run: |
+          dnf install -y rpm-build dnf5-plugins cargo-rpm-macros gcc gcc-c++ \
+            cmake make lld python3 rust cargo
+          case "$(uname -m)" in
+            x86_64) target=x86_64-unknown-none ;;
+            aarch64) target=aarch64-unknown-none-softfloat ;;
+          esac
+          dnf install -y "rust-std-static-$target"
+      - name: Rebuild all packages without network
+        run: |
+          for srpm in srpms/*.src.rpm; do
+            dnf builddep -y "$srpm"
+            unshare --net rpmbuild --rebuild "$srpm" \
+              --define "_topdir $RUNNER_TEMP/rpmbuild"
+          done
+      - name: Install packages together
+        run: |
+          dnf install -y "$RUNNER_TEMP"/rpmbuild/RPMS/*/*.rpm
+          arma --help
+          dillo --help
+          pichi --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.release }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/rpmbuild/RPMS

@@ -1,0 +1,30 @@
+{
+  "corium": {
+    "pin": "57b8734fe5f7ecc3cf43a5880b9fd18378a56ff8",
+    "version": "0.2.0",
+    "release": "2",
+    "upstream_version": "0.2.0",
+    "source": "packaging/corium/src"
+  },
+  "arma": {
+    "pin": "6d932cf6f8886a3c1bd91ea90def706768a6ca58",
+    "version": "0.1.0",
+    "release": "2",
+    "upstream_version": "0.1.0",
+    "source": "packaging/arma/src"
+  },
+  "dillo": {
+    "pin": "d30e8cfbc6671f4b0e653400cfaca8d7ec948dd3",
+    "version": "0.1.0",
+    "release": "2",
+    "upstream_version": "0.1.0",
+    "source": "packaging/dillo/src"
+  },
+  "pichi": {
+    "pin": "585738509eaa17eeb99974ccf2f08de21d01c8d5",
+    "version": "0.1.0",
+    "release": "2",
+    "upstream_version": "0.1.0",
+    "source": "packaging/pichi/src"
+  }
+}
