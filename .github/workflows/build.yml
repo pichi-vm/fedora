@@ -88,7 +88,7 @@ jobs:
           # Dillo requires 2 MiB hugepages. config.json recommends 2048 MiB.
           test -r /dev/kvm && test -w /dev/kvm
           want=1024
-          for attempt in 1 2 3 4 5 6; do
+          for _ in 1 2 3 4 5 6; do
             pages=$(cat /proc/sys/vm/nr_hugepages)
             if [ "$pages" -ge "$want" ]; then break; fi
             sync
