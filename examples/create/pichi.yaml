@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+stages:
+  rootfs:
+    use: ghcr.io/pichi-vm/fedora:43
+    format:
+      fs: ext4
+      size: 4GiB
+      label: fedora
+      esp: 512MiB
+    mounts:
+      /boot/efi: esp
+      /run: tmpfs
+      /tmp: tmpfs
+    steps:
+      - exec:
+          command: |
+            dnf -y --installroot=/mnt --use-host-config --releasever=43 --setopt=install_weak_deps=False install filesystem systemd systemd-udev kernel-core bash coreutils dnf glibc-minimal-langpack ca-certificates cpio kmod
+            mkdir -p /mnt/dev /mnt/proc /mnt/sys /mnt/run
+            printf 'Fedora stage example\n' > /mnt/etc/pichi-variant
+            printf 'created with the root\n' > /mnt/boot/efi/marker
+          network: true
+          timeout: 600s
+  firmware:
+    extend: rootfs
+    mounts:
+      /tmp: tmpfs
+    steps:
+      - copy: {path: tools/arma/bin/arma, into: /tmp/arma}
+      - copy: {path: tools/corium/bin/corium, into: /tmp/corium}
+      - exec:
+          command: |
+            set -- /usr/lib/modules/*
+            test "$#" -eq 1
+            modules=$1
+            kernel_version=$(basename "$modules")
+            mkdir -p /tmp/initrd /out
+            cp /tmp/corium /tmp/initrd/init
+            : > /tmp/module-list
+            for module in virtio_pci virtio_blk virtio_console dm_mod dm_zero dm_snapshot dm_verity ext4; do
+              modprobe --set-version "$kernel_version" --show-depends "$module" >> /tmp/module-list
+            done
+            while read -r action path extra; do
+              if test "$action" = insmod; then
+                path=$(readlink -f "$path")
+                install -D -m0644 "$path" "/tmp/initrd$path"
+              fi
+            done < /tmp/module-list
+            (cd /tmp/initrd && find . -print0 | cpio --null --create --format=newc --quiet) > /tmp/initrd.cpio
+            /tmp/arma build --kernel "$modules/vmlinuz" --config "$modules/config" --initrd /tmp/initrd.cpio --cmdline bootconfig --dtb attached /out/boot.pmi
+image:
+  root: rootfs
+  boot:
+    extract: {from: firmware, path: /out/boot.pmi}
+    define:
+      corium.root: ""
+      kernel.ro: []
+      kernel.console: hvc0
+      kernel.systemd.volatile: state
+      kernel.systemd.unit: multi-user.target
+      kernel.systemd.show_status: "false"

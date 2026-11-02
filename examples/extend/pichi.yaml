@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+stages:
+  configured:
+    extend: example.local/fedora:base
+    mounts:
+      /boot/efi: esp
+      /tmp: tmpfs
+    steps:
+      - exec:
+          command: |
+            test "$(cat /boot/efi/marker)" = 'created with the root'
+            printf 'extended Fedora\n' > /etc/pichi-variant
+            printf 'extended with the root\n' >> /boot/efi/marker
+image:
+  root: configured
+  boot:
+    inherit: configured
+    extend:
+      kernel.loglevel: "4"
+      kernel.quiet: []
