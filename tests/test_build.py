@@ -15,6 +15,7 @@ import unittest
 REPO = Path(__file__).resolve().parents[1]
 CONFIG = """CONFIG_BLOCK=y
 CONFIG_BLK_DEV_INITRD=y
+CONFIG_BOOT_CONFIG=y
 CONFIG_DEVTMPFS=y
 CONFIG_PROC_FS=y
 CONFIG_SYSFS=y
@@ -92,7 +93,7 @@ class Finalize(unittest.TestCase):
         self.assertIn("exactly one kernel", result.stderr)
 
     def test_requires_gpt_discovery_and_root_drivers(self):
-        for option in ["CONFIG_EFI_PARTITION", "CONFIG_EXT4_FS", "CONFIG_DM_VERITY"]:
+        for option in ["CONFIG_EFI_PARTITION", "CONFIG_BOOT_CONFIG", "CONFIG_EXT4_FS", "CONFIG_DM_VERITY"]:
             with self.subTest(option=option):
                 (self.kd / "config").write_text("\n".join(
                     line for line in CONFIG.splitlines() if not line.startswith(option + "=")
@@ -172,6 +173,7 @@ class Build(unittest.TestCase):
 work = Path(args[args.index('--output-dir') + 1])
 work.mkdir(exist_ok=True)
 (work / 'fedora.root-x86-64.raw').touch()
+(work / 'fedora.raw').touch()
 (work / 'kver').write_text('7.1.4-test')
 (work / 'vmlinuz').touch()
 (work / 'kernel.config').touch()
@@ -211,7 +213,7 @@ dest.write_bytes(Path(os.environ['TEST_CORIUM']).read_bytes())
         calls = [json.loads(line) for line in self.log.read_text().splitlines()]
         return result, calls
 
-    def test_packages_corium_and_seals_only_current_root_argument(self):
+    def test_packages_corium_with_immutable_pmi_and_bootconfig(self):
         result, calls = self.run_build()
         self.assertEqual(result.returncode, 0, result.stderr)
         init = self.root / ".build/initrd-root/init"
@@ -223,9 +225,16 @@ dest.write_bytes(Path(os.environ['TEST_CORIUM']).read_bytes())
         self.assertIn(b"dm-verity.ko", archive.stdout)
         arma = next(call for call in calls if call[0] == "arma")
         cmdline = arma[arma.index("--cmdline") + 1].split()
-        self.assertEqual([x for x in cmdline if x.startswith("corium=")], ["corium=" + "ab" * 32])
-        self.assertFalse(any(x.startswith(("root=", "carapacehash=", "root.carapace=")) for x in cmdline))
-        self.assertEqual(sum(call[:3] == ["pichi", "import", "raw"] for call in calls), 1)
+        self.assertEqual(cmdline, ["bootconfig"])
+        self.assertEqual(arma[arma.index("--dtb") + 1], "attached")
+        config = self.root / ".build/bootconfig"
+        self.assertIn('corium.root = "' + "ab" * 32 + '"', config.read_text())
+        imports = [call for call in calls if call[:3] == ["pichi", "import", "raw"]]
+        self.assertEqual(len(imports), 1)
+        self.assertEqual(Path(imports[0][3]).name, "fedora.raw")
+        pmi_import = next(call for call in calls if call[:3] == ["pichi", "import", "pmi"])
+        self.assertEqual(pmi_import[pmi_import.index("--bootconfig") + 1], str(config))
+        self.assertNotIn("--dtb", pmi_import)
         mkosi = next(call for call in calls if call[0] == "mkosi")
         self.assertEqual(mkosi[mkosi.index("--release") + 1], "43")
 
@@ -254,7 +263,7 @@ dest.write_bytes(Path(os.environ['TEST_CORIUM']).read_bytes())
         self.assertFalse(any(call[0] in ("mkosi", "cargo", "arma") for call in calls))
 
     def test_rejects_invalid_integrity_roots_before_sealing(self):
-        for root in ["", "0x" + "ab" * 32, "ab", "zz" * 32]:
+        for root in ["", "0x" + "ab" * 32, "ab", "zz" * 32, "00" * 32]:
             with self.subTest(root=root):
                 self.log.unlink(missing_ok=True)
                 self.env["TEST_ROOT_HASH"] = root
