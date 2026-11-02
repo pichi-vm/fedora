@@ -10,8 +10,8 @@ login guest is terminated by the harness, not claimed to have powered off.
 """
 
 import argparse
+import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -63,19 +63,18 @@ def main():
     # Unique directory preserves previous success/failure evidence.
     output = work / f"boot-tests-{time.time_ns()}"
     output.mkdir()
-    cmdline = (work / "cmdline").read_text().strip()
-    roots = [x for x in cmdline.split() if x.startswith("corium=")]
-    if len(roots) != 1 or not re.fullmatch(r"corium=[0-9a-fA-F]{64}", roots[0]):
-        raise AssertionError("expected exactly one SHA-256 corium=<root-hash>")
-    if any(x.startswith(("root=", "carapacehash=", "root.carapace=")) for x in cmdline.split()):
-        raise AssertionError("obsolete root argument in built command line")
+    config = (work / "bootconfig").read_text()
+    roots = re.findall(r'^corium\.root = "([0-9a-fA-F]{64})"$', config, re.MULTILINE)
+    if len(roots) != 1:
+        raise AssertionError("expected exactly one SHA-256 corium.root value")
+    pmi_digest = "sha256:" + hashlib.sha256((work / "boot.pmi").read_bytes()).hexdigest()
     reference = f"fedora:{args.release}"
     manifest_root = subprocess.check_output([
         "pichi", "inspect", reference, "--format",
         '{{ manifest.annotations["dev.pichi.carapace.verity.hash"] }}',
     ], text=True).strip()
-    if roots[0] != f"corium={manifest_root}":
-        raise AssertionError("built command line does not match imported artifact root")
+    if roots[0] != manifest_root:
+        raise AssertionError("bootconfig does not match imported artifact root")
     results = {}
     try:
         results["systemd-handoff"] = boot(reference, output / "systemd-handoff.log", "",
@@ -83,24 +82,24 @@ def main():
         print(f"PASS systemd-handoff: {results['systemd-handoff']}", flush=True)
         wrong = ("0" if manifest_root[0] != "0" else "1") + manifest_root[1:]
         for name, argument, diagnostic in [
-            ("wrong-root", f"corium={wrong}", "discover root:"),
-            ("legacy-root", f"carapacehash={manifest_root}", "missing corium=<root-hash>"),
+            ("wrong-root", f'corium.root = "{wrong}"', "discover root:"),
+            ("legacy-root", f'kernel.carapacehash = "{manifest_root}"', "missing corium.root"),
         ]:
             case = output / name
             case.mkdir()
-            options = cmdline.replace(roots[0], argument)
-            (case / "cmdline").write_text(options + "\n")
-            subprocess.run([
-                os.environ.get("ARMA", "arma"), "build", "--kernel", str(work / "vmlinuz"),
-                "--config", str(work / "kernel.config"), "--initrd", str(work / "initrd.cpio"),
-                "--cmdline", options, "--dtb", str(case / "base.dtb"), str(case / "boot.pmi"),
-            ], check=True, timeout=args.timeout)
+            options = config.replace(f'corium.root = "{roots[0]}"', argument)
+            (case / "bootconfig").write_text(options)
             tag = f"fedora:corium-test-{output.name}-{name}"
             subprocess.run([
-                "pichi", "import", "pmi", str(case / "boot.pmi"),
-                "--dtb", str(case / "base.dtb"), "--config", str(REPO / "config.json"),
+                "pichi", "import", "pmi", str(work / "boot.pmi"),
+                "--bootconfig", str(case / "bootconfig"), "--config", str(REPO / "config.json"),
                 "--carapace", f"fedora:{args.release}-carapace", "-t", tag,
             ], check=True, timeout=args.timeout)
+            image = json.loads(subprocess.check_output(["pichi", "inspect", tag]))
+            firmware = [layer["digest"] for layer in image["manifest"]["layers"]
+                        if layer["mediaType"] == "application/vnd.pichi.pmi.v1"]
+            if firmware != [pmi_digest]:
+                raise AssertionError("configuration replacement changed the PMI")
             results[name] = boot(tag, case / "console.log", diagnostic, args.timeout)
             print(f"PASS {name}: {results[name]}", flush=True)
     finally:

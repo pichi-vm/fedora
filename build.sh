@@ -2,24 +2,15 @@
 # SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: Apache-2.0
 
-# Build the Fedora combined base OS image — a single pichi artifact carrying the
-# carapace (scutes) + a detached base DTB + a detached-mode PMI + the launch
-# config. `pichi run` boots it: the PMI's initramfs is a single static `corium`
-# binary as init — it loads the shipped modules, reads `corium=`, discovers the
-# scutes on GPT partitions, mounts the root read-only and executes /sbin/init.
-# Corium requires Linux 7.0+ for the initramfs pivot. No systemd or udev
-# in the initramfs. The result is a general-purpose base: it boots to
-# multi-user.target with a console login, for other images to build on.
+# Build a Fedora image with a partitioned carapace, immutable PMI, native
+# bootconfig and launch requirements. Static Corium in the initramfs assembles
+# the chain, discovers its GPT root partition and pivots to systemd.
 #
-# ONE mkosi run builds the rootfs carapace and exports what the PMI needs;
-# build.sh then assembles the tiny custom initramfs:
-#   * mkosi.repart/ packs the rootfs into a bare ext4 root partition emitted as
-#     <output>.root-<arch>.raw (SplitArtifacts=partitions, no GPT);
-#   * mkosi.finalize copies out vmlinuz + kernel config + kver, and exports the
-#     initramfs module set (pivot modules not builtin, + deps) to initrd-mods/;
-#   * the initramfs = static `corium` (musl) as /init + those .ko, cpio'd here.
-# One kernel version underpins the PMI vmlinuz, the initramfs modules, and the
-# carapace /usr/lib/modules — all from the single mkosi build.
+# One mkosi run supplies the kernel, matching module tree and complete GPT
+# disk. The PMI embeds its platform device tree and fixed bootconfig command
+# line; the selected carapace root travels in a separate configuration blob.
+# Corium requires Linux 7.0+ for the initramfs pivot. No systemd or udev is
+# needed in the initramfs. Fedora boots to a console login.
 #
 # Requires: mkosi, pichi, arma (ARMA=<path> or on PATH), cargo + rustup (static
 # musl target), cpio, dumpe2fs (e2fsprogs). Runs rootless (userns).
@@ -29,8 +20,8 @@ RELEASE="${RELEASE:-43}"
 IMAGE="${IMAGE:-ghcr.io/pichi-vm/fedora}"
 ARMA="${ARMA:-arma}"
 CORIUM_GIT="${CORIUM_GIT:-https://github.com/pichi-vm/corium}"
-# Corium 0.2: Linux 7+, corium=<hash>, GPT discovery and /sbin/init handoff.
-CORIUM_REV="${CORIUM_REV:-0c6f5743263b1d7afb298521859b6679eb67f2af}"
+# Corium reads native bootconfig and maps the discovered GPT root partition.
+CORIUM_REV="${CORIUM_REV:-c33ae0e01d58b657f8f62cb91672885326a903b9}"
 CORIUM_TOOLCHAIN="${CORIUM_TOOLCHAIN:-stable}"
 
 case "$(uname -m)" in
@@ -73,8 +64,9 @@ find_one() {
 	ls -1 "$work" >&2
 	exit 1
 }
-# repart names the split partition after its label: <output>.root-<arch>.raw
-# (e.g. fedora.root-x86-64.raw) — NOT the full-disk fedora.raw.
+# Keep the split filesystem for inspection; import the complete GPT disk.
+disk="$work/fedora.raw"
+[ -f "$disk" ] || { echo "!!! mkosi did not produce a GPT disk" >&2; exit 1; }
 root="$(find_one 'root ext4 partition' "$work"/*.root-*.raw "$work"/*.root.raw)"
 kver="$(cat "$work/kver")"
 echo ">>> kernel $kver  root $(basename "$root")"
@@ -97,49 +89,44 @@ echo ">>> initrd $(du -h "$initrd" | cut -f1)  modules: $(find "$stage" -name '*
 # ---- 4. import the carapace once; read its top root hash ------------------
 # `import raw` caches the carapace (sparse SEEK_HOLE ingest, O(content)), tagged
 # as the reusable base and reused via `--carapace` in step 6 (imported ONCE). The
-# dm-verity top hash — the `corium=` trust anchor — is a manifest
+# dm-verity top hash — the `corium.root` trust anchor — is a manifest
 # annotation, read via `inspect`.
 carapace="fedora:$RELEASE-carapace"
-pichi import raw "$root" -t "$carapace" --quiet
+pichi import raw "$disk" -t "$carapace" --quiet
 hash="$(pichi inspect "$carapace" \
 	--format '{{ manifest.annotations["dev.pichi.carapace.verity.hash"] }}')"
 # The manifest contract is SHA-256. Never seal an empty/malformed trust anchor.
-[[ "$hash" =~ ^[[:xdigit:]]{64}$ ]] || { echo "!!! invalid carapace verity root: $hash" >&2; exit 1; }
+[[ "$hash" =~ ^[[:xdigit:]]{64}$ && "$hash" =~ [1-9a-fA-F] ]] || { echo "!!! invalid carapace verity root: $hash" >&2; exit 1; }
 echo ">>> carapace $carapace  root $hash"
 
-# ---- 5. detached-mode PMI + base DTB -------------------------------------
-# Cmdline notes:
-#   corium=             trusted chain root read by Corium (PID1). pichi run
-#                       exposes scute COW/verity GPT partitions; Corium discovers
-#                       them by PARTUUID. No fixed /dev/mapper/root or root=.
-#   console=hvc0        the virtio-console; dillo surfaces it to the host.
-#   systemd.*           apply to the REAL init (systemd in the rootfs, post-
-#                       pivot): volatile /var (REQUIRED — the carapace
-#                       root is read-only; a derivative with a data volume
-#                       overrides it), multi-user with a console getty, quiet
-#                       console status.
-# Slot inference (from --config) now emits a PCIe bridge and no virtio-mmio
-# slots for this kernel: virtio_pci is builtin (works from the first
-# instruction, carries the early console) while virtio-mmio is a module we
-# neither ship nor need, so arma correctly omits the empty mmio transport
-# slots the guest would otherwise probe and reject at boot.
-cmdline="corium=$hash console=hvc0 systemd.volatile=state systemd.unit=multi-user.target systemd.show_status=false"
-printf '%s\n' "$cmdline" > "$work/cmdline"
+# ---- 5. immutable PMI plus native boot configuration --------------------
+# The command line is fixed. The trusted root and systemd settings can change
+# with image composition while preserving the measured kernel and initramfs.
+cat > "$work/bootconfig" <<EOF
+corium.root = "$hash"
+kernel {
+    ro
+    console = "hvc0"
+    systemd.volatile = "state"
+    systemd.unit = "multi-user.target"
+    systemd.show_status = "false"
+}
+EOF
 "$ARMA" build \
 	--kernel "$work/vmlinuz" \
 	--config "$work/kernel.config" \
 	--initrd "$initrd" \
-	--cmdline "$cmdline" \
-	--dtb "$work/base.dtb" \
+	--cmdline bootconfig \
+	--dtb attached \
 	"$work/boot.pmi"
 
-# ---- 6. combine PMI + DTB + config onto the carapace ---------------------
+# ---- 6. combine PMI and bootconfig onto the carapace ----------------------
 # Stamp OCI provenance annotations onto the artifact manifest (pichi carries
 # them verbatim; structural verity keys can't be overridden). revision prefers
 # an explicit $REVISION (set by CI), falling back to git, then "unknown".
 rev="${REVISION:-$(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)}"
 pichi import pmi "$work/boot.pmi" \
-	--dtb "$work/base.dtb" \
+	--bootconfig "$work/bootconfig" \
 	--config "$here/config.json" \
 	--carapace "$carapace" \
 	-a "org.opencontainers.image.source=https://github.com/pichi-vm/fedora" \
@@ -149,6 +136,6 @@ pichi import pmi "$work/boot.pmi" \
 	-a "org.opencontainers.image.description=Fedora $RELEASE base OS carapace for pichi" \
 	-t "fedora:$RELEASE"
 
-echo ">>> imported combined artifact fedora:$RELEASE (carapace + dtb + pmi + config)"
+echo ">>> imported combined artifact fedora:$RELEASE (carapace + pmi + bootconfig + config)"
 echo "    run:  pichi run fedora:$RELEASE  # boots to a console login (multi-user)"
-echo "    push: pichi push fedora:$RELEASE $IMAGE:$RELEASE-<arch>"
+echo "    publish: tag fedora:$RELEASE as $IMAGE:$RELEASE-<arch>, then pichi push that tag"
