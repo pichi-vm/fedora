@@ -1,7 +1,7 @@
 name: build
 
 on:
-  # Called from ci.yml after Tier-1 checks. Manual dispatch remains
+  # Called from ci.yml. Manual dispatch remains
   # available; push and pull_request do not start this workflow directly.
   workflow_call:
   workflow_dispatch:
@@ -13,6 +13,13 @@ env:
   NIGHTLY: "nightly-2026-07-06"
 
 jobs:
+  # Validate alongside builds; publication requires both to succeed.
+  checks:
+    name: checks
+    uses: ./.github/workflows/checks.yml
+    permissions:
+      contents: read
+
   # Build each arch natively (no QEMU) — public repos get free arm64 runners.
   # Each build exports its image as an OCI layout directory and uploads it; no
   # arch pushes to the registry directly. The index job loads both and pushes
@@ -126,7 +133,7 @@ jobs:
   index:
     # Feature branches and PRs validate both architectures without publishing.
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: build
+    needs: [build, checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read
