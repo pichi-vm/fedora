@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Build the Fedora combined base OS image — a single pichi artifact carrying the
-# carapace (scutes) + a detached base DTB + a detached-mode PMI + the launch
-# config. `pichi run` boots it: the PMI's initramfs is a single static `corium`
+# carapace (scutes) + a PMI with its base DTB embedded + the launch config.
+# `pichi run` boots it: the PMI's initramfs is a single static `corium`
 # binary as init — it loads the shipped modules, reads `corium=`, discovers the
 # scutes on GPT partitions, mounts the root read-only and executes /sbin/init.
 # Corium requires Linux 7.0+ for the initramfs pivot. No systemd or udev
@@ -107,7 +107,7 @@ hash="$(pichi inspect "$carapace" \
 [[ "$hash" =~ ^[[:xdigit:]]{64}$ ]] || { echo "!!! invalid carapace verity root: $hash" >&2; exit 1; }
 echo ">>> carapace $carapace  root $hash"
 
-# ---- 5. detached-mode PMI + base DTB -------------------------------------
+# ---- 5. PMI with embedded base DTB -------------------------------------
 # Cmdline notes:
 #   corium=             trusted chain root read by Corium (PID1). pichi run
 #                       exposes scute COW/verity GPT partitions; Corium discovers
@@ -130,16 +130,15 @@ printf '%s\n' "$cmdline" > "$work/cmdline"
 	--config "$work/kernel.config" \
 	--initrd "$initrd" \
 	--cmdline "$cmdline" \
-	--dtb "$work/base.dtb" \
+	--dtb attached \
 	"$work/boot.pmi"
 
-# ---- 6. combine PMI + DTB + config onto the carapace ---------------------
+# ---- 6. combine PMI + config onto the carapace ---------------------
 # Stamp OCI provenance annotations onto the artifact manifest (pichi carries
 # them verbatim; structural verity keys can't be overridden). revision prefers
 # an explicit $REVISION (set by CI), falling back to git, then "unknown".
 rev="${REVISION:-$(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)}"
 pichi import pmi "$work/boot.pmi" \
-	--dtb "$work/base.dtb" \
 	--config "$here/config.json" \
 	--carapace "$carapace" \
 	-a "org.opencontainers.image.source=https://github.com/pichi-vm/fedora" \
@@ -149,6 +148,6 @@ pichi import pmi "$work/boot.pmi" \
 	-a "org.opencontainers.image.description=Fedora $RELEASE base OS carapace for pichi" \
 	-t "fedora:$RELEASE"
 
-echo ">>> imported combined artifact fedora:$RELEASE (carapace + dtb + pmi + config)"
+echo ">>> imported combined artifact fedora:$RELEASE (carapace + pmi + config)"
 echo "    run:  pichi run fedora:$RELEASE  # boots to a console login (multi-user)"
 echo "    push: pichi push fedora:$RELEASE $IMAGE:$RELEASE-<arch>"
