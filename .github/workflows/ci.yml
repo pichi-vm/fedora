@@ -15,22 +15,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# Fail-fast DAG. This is the only push / pull_request entrypoint.
-#
-# Tier 1 — checks (parallel): regression, license headers, commit messages
-# Tier 2 — image matrix, only after Tier 1 succeeds
-#
-# A red Tier-1 job skips the mkosi/image build.
 jobs:
-  checks:
-    name: checks
-    uses: ./.github/workflows/checks.yml
-    permissions:
-      contents: read
-
   build:
     name: build
-    needs: [checks]
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read

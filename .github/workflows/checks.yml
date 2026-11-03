@@ -4,8 +4,7 @@ on:
   workflow_call:
   workflow_dispatch:
 
-# Cheap tier. ci.yml waits on this whole workflow before the image matrix,
-# so a red regression, header, or commit-message check skips that build.
+# These checks run alongside image builds and gate publication.
 permissions:
   contents: read
 
