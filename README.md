@@ -4,10 +4,9 @@ CI-built **Fedora combined base OS image** for the pichi ecosystem — a single
 pichi artifact that both serves as a `from:` base and boots directly with
 `pichi run`.
 
-The artifact bundles all four pieces of the [`dt`](https://github.com/pichi-vm/pmi)
-combined-image format: the **carapace** (scutes — the Fedora rootfs), a
-**detached base DTB**, a **detached-mode PMI** (kernel + a tiny custom
-initramfs), and the launch **config**. The initramfs is a single **static
+The artifact bundles the **carapace** (scutes — the Fedora rootfs), a
+**PMI** (kernel + a tiny custom initramfs + an embedded base DTB), and the
+launch **config**. The initramfs is a single **static
 `corium` binary as `/init`** plus the handful of kernel modules the distro
 kernel doesn't build in — no systemd, no udev. As PID1 it mounts the API
 filesystems, loads those modules, reads `corium=<root-hash>` from the measured
@@ -52,10 +51,10 @@ mkosi ──▶ import raw ──▶ arma build ──▶ import pmi
    `fedora:<release>-carapace`, a reusable `from:` base) and exposes its
    dm-verity top hash as a manifest annotation. The carapace is imported
    **once** — reused in step 4 via `--carapace`, so there's no throwaway import.
-3. **`arma build … --dtb`** seals the detached PMI + base DTB with
+3. **`arma build … --dtb attached`** seals the PMI with its base DTB embedded and
    `corium=<top>` (read back via `pichi inspect`) on the cmdline — arma
    needs the hash before the bootable artifact can be sealed.
-4. **`pichi import pmi … --carapace <ref> --dtb --config`** layers the boot
+4. **`pichi import pmi … --carapace <ref> --config`** layers the boot
    payload onto the cached carapace, producing the combined artifact; CI then
    `pichi save`/`load` per arch and does one atomic multi-arch `pichi push`
    (see below).
@@ -117,7 +116,7 @@ isolated fixtures and tool doubles. They are not boot tests. CI runs them in
 addition to native combined-artifact builds for amd64 and arm64, license-header
 checks and gitlint. A successful build alone does not prove VM handoff.
 
-On a native Linux/KVM host with a current dillo supporting detached DTBs and
+On a native Linux/KVM host with a current dillo supporting embedded DTBs and
 a pre-provisioned pool of 2 MiB hugepages sufficient for the configured guest
 RAM (2048 MiB recommended by `config.json`):
 

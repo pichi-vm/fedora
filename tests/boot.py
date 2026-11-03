@@ -93,12 +93,12 @@ def main():
             subprocess.run([
                 os.environ.get("ARMA", "arma"), "build", "--kernel", str(work / "vmlinuz"),
                 "--config", str(work / "kernel.config"), "--initrd", str(work / "initrd.cpio"),
-                "--cmdline", options, "--dtb", str(case / "base.dtb"), str(case / "boot.pmi"),
+                "--cmdline", options, "--dtb", "attached", str(case / "boot.pmi"),
             ], check=True, timeout=args.timeout)
             tag = f"fedora:corium-test-{output.name}-{name}"
             subprocess.run([
                 "pichi", "import", "pmi", str(case / "boot.pmi"),
-                "--dtb", str(case / "base.dtb"), "--config", str(REPO / "config.json"),
+                "--config", str(REPO / "config.json"),
                 "--carapace", f"fedora:{args.release}-carapace", "-t", tag,
             ], check=True, timeout=args.timeout)
             results[name] = boot(tag, case / "console.log", diagnostic, args.timeout)
