@@ -1,0 +1,3 @@
+[submodule "sources/arma"]
+	path = sources/arma
+	url = https://github.com/pichi-vm/arma
