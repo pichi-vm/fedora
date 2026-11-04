@@ -1,3 +1,6 @@
 [submodule "sources/arma"]
 	path = sources/arma
 	url = https://github.com/pichi-vm/arma
+[submodule "sources/corium"]
+	path = sources/corium
+	url = https://github.com/pichi-vm/corium
