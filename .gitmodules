@@ -1,0 +1,12 @@
+[submodule "packaging/corium"]
+	path = packaging/corium/src
+	url = https://github.com/pichi-vm/corium
+[submodule "packaging/arma"]
+	path = packaging/arma/src
+	url = https://github.com/pichi-vm/arma
+[submodule "packaging/dillo"]
+	path = packaging/dillo/src
+	url = https://github.com/pichi-vm/dillo
+[submodule "packaging/pichi"]
+	path = packaging/pichi/src
+	url = https://github.com/pichi-vm/pichi
