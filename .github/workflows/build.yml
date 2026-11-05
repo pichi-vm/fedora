@@ -6,11 +6,16 @@ on:
   workflow_call:
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 env:
   RELEASE: "43"
-  # arma and pichi are nightly-only (artifact deps / `-Z bindeps`); arma
-  # cross-compiles the tatu firmware to bare-metal targets. Pin the toolchain.
   NIGHTLY: "nightly-2026-07-06"
+  PICHI_REV: "1ca6ef6eb7788feac815f7d0bad7ff515116e42e"
+  DILLO_REV: "4afc85c8580f763f0cb68472701e1ff9e261e250"
+  BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:262f87ecd7a178a90979eebd9689a0a28c1a4d844e6572a0fea116bf782a0b6f"
 
 jobs:
   # Validate alongside builds; publication requires both to succeed.
@@ -20,70 +25,111 @@ jobs:
     permissions:
       contents: read
 
-  # Build each arch natively (no QEMU) — public repos get free arm64 runners.
-  # Each build exports its image as an OCI layout directory and uploads it; no
-  # arch pushes to the registry directly. The index job loads both and pushes
-  # everything atomically (podman `manifest push --all` semantics).
-  build:
+  # Prepare native seeds on Ubuntu; the ARM KVM runner uses NixOS.
+  tool-image:
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    container:
-      image: fedora:43
-      # --privileged: mkosi + `unshare -r` (the rootfs strip / mkfs) need
-      # user namespaces and full device access.
-      options: --privileged
+    permissions:
+      contents: read
+    steps:
+      - name: Build Pichi
+        run: |
+          rustup toolchain install "$NIGHTLY" --profile minimal
+          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/pichi "$RUNNER_TEMP/pichi"
+          git -C "$RUNNER_TEMP/pichi" checkout --detach "$PICHI_REV"
+          (cd "$RUNNER_TEMP/pichi" && cargo "+$NIGHTLY" build --locked --release --bin pichi)
+          echo "$RUNNER_TEMP/pichi/target/release" >> "$GITHUB_PATH"
+          echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
+
+      - name: Obtain the Fedora tool image
+        run: |
+          mkdir -p .build
+          if ! pichi pull ghcr.io/pichi-vm/fedora:43; then
+            sudo apt-get update
+            sudo apt-get install -y dnf rpm e2fsprogs
+            sudo dnf -y --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 \
+              --repofrompath=fedora,https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/$(uname -m)/os/ \
+              --repo=fedora --setopt=fedora.gpgkey=https://fedoraproject.org/fedora.gpg \
+              --setopt=gpgcheck=1 --setopt=install_weak_deps=False install \
+              filesystem bash coreutils dnf glibc-minimal-langpack ca-certificates
+            sudo dnf --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 clean all
+            sudo mkfs.ext4 -F -d "$RUNNER_TEMP/fedora-root" .build/bootstrap.raw 1G
+            pichi import raw .build/bootstrap.raw -t ghcr.io/pichi-vm/fedora:43
+          fi
+          pichi inspect ghcr.io/pichi-vm/fedora:43 > .build/seed.json
+          pichi save ghcr.io/pichi-vm/fedora:43 -o .build/tool-image
+
+      - name: Upload native tool image
+        uses: actions/upload-artifact@v4
+        with:
+          name: tool-image-${{ matrix.arch }}
+          path: |
+            .build/tool-image
+            .build/seed.json
+          include-hidden-files: true
+
+  build:
+    needs: tool-image
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: [ self-hosted, Linux, ARM64, bare-metal, aarch64, kvm ]
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          submodules: recursive
 
-      - name: Install system tooling
-        run: >-
-          dnf install -y
-          mkosi systemd-standalone-repart e2fsprogs util-linux coreutils cpio
-          git gcc curl openssl-devel pkgconf-pkg-config perl
-
-      - name: Install Rust (${{ env.NIGHTLY }} + bare-metal targets)
+      - name: Reserve build VM memory
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
-            -y --profile minimal --default-toolchain "$NIGHTLY" \
-            --target x86_64-unknown-none --target aarch64-unknown-none
-          "$HOME/.cargo/bin/rustup" toolchain install stable --profile minimal
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          if [ "${{ matrix.arch }}" = amd64 ]; then
+            sudo chmod a+rw /dev/kvm
+            sudo sysctl -w vm.nr_hugepages=4096
+          fi
+          test -r /dev/kvm && test -w /dev/kvm
+          test "$(cat /proc/sys/vm/nr_hugepages)" -ge 4096
 
-      - name: Build arma + pichi from main (nightly, -Z bindeps)
+      - name: Build Pichi and Dillo
         run: |
-          # Built in-repo so each crate's rust-toolchain.toml / .cargo/config
-          # (bindeps, targets) apply automatically. Corium is installed by
-          # build.sh itself.
-          git clone --depth 1 https://github.com/pichi-vm/arma /tmp/arma
-          (cd /tmp/arma && cargo build --release --bin arma)
-          echo "ARMA=/tmp/arma/target/release/arma" >> "$GITHUB_ENV"
-          git clone --depth 1 https://github.com/pichi-vm/pichi /tmp/pichi
-          (cd /tmp/pichi && cargo build --release --bin pichi)
-          install -m755 /tmp/pichi/target/release/pichi /usr/local/bin/pichi
+          rustup toolchain install "$NIGHTLY" --profile minimal
+          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/pichi "$RUNNER_TEMP/pichi"
+          git -C "$RUNNER_TEMP/pichi" checkout --detach "$PICHI_REV"
+          (cd "$RUNNER_TEMP/pichi" && cargo "+$NIGHTLY" build --locked --release --bin pichi)
+          echo "$RUNNER_TEMP/pichi/target/release" >> "$GITHUB_PATH"
+          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/dillo "$RUNNER_TEMP/dillo"
+          git -C "$RUNNER_TEMP/dillo" checkout --detach "$DILLO_REV"
+          (cd "$RUNNER_TEMP/dillo" && cargo "+$NIGHTLY" --config packaging/cargo-config.toml build --locked --release --bin dillo)
+          echo "PICHI_DILLO=$RUNNER_TEMP/dillo/target/release/dillo" >> "$GITHUB_ENV"
+          echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
 
-      - name: Build combined base OS image (native ${{ matrix.arch }})
-        # REVISION reaches build.sh's provenance stamp: git rev-parse isn't
-        # reliable in this checkout, so pass the SHA explicitly.
-        env:
-          REVISION: ${{ github.sha }}
-        run: ./build.sh
+      - name: Download native tool image
+        uses: actions/download-artifact@v4
+        with:
+          name: tool-image-${{ matrix.arch }}
+          path: .build
 
-      - name: Validate image-builder regression tests
+      - name: Build Fedora
         run: |
-          python3 -m unittest discover -s tests -v
-          bash -n build.sh
+          pichi load .build/tool-image --tag ghcr.io/pichi-vm/fedora:43
+          pichi build . --ref HEAD --build-image "$BUILD_IMAGE" --memory 8192 \
+            -t qualification.local/fedora:f1
 
-      - name: Export image as an OCI layout directory
-        run: pichi save "fedora:${RELEASE}" -o "oci-${{ matrix.arch }}"
+      - name: Export production image
+        run: pichi save qualification.local/fedora:f1 -o "oci-${{ matrix.arch }}"
 
       - name: Upload OCI layout artifact
         uses: actions/upload-artifact@v4
@@ -105,8 +151,9 @@ jobs:
       - name: Install pichi
         run: |
           rustup toolchain install "$NIGHTLY" --profile minimal
-          git clone --depth 1 https://github.com/pichi-vm/pichi /tmp/pichi
-          (cd /tmp/pichi && cargo "+$NIGHTLY" build --release --bin pichi)
+          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/pichi /tmp/pichi
+          git -C /tmp/pichi checkout --detach "$PICHI_REV"
+          (cd /tmp/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
           sudo install -m755 /tmp/pichi/target/release/pichi /usr/local/bin/pichi
 
       - name: Download OCI layout artifacts
