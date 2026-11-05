@@ -128,6 +128,55 @@ jobs:
           pichi build . --ref HEAD --build-image "$BUILD_IMAGE" --memory 8192 \
             -t qualification.local/fedora:f1
 
+      - name: Qualify Fedora successor builds
+        run: |
+          original=$(git rev-parse HEAD)
+          pichi inspect qualification.local/fedora:f1 > .build/f1.json
+          test "$(pichi inspect qualification.local/fedora:f1 --format \
+            '{{ manifest.annotations["dev.pichi.build.commit"] }}')" = "sha1:$original"
+          test "$(pichi inspect qualification.local/fedora:f1 --format \
+            '{{ manifest.annotations["dev.pichi.build.bootstrapped"] }}')" = true
+          test "$(pichi inspect qualification.local/fedora:f1 --format \
+            '{{ "dev.pichi.build.lock" in manifest.annotations }}')" = false
+
+          pichi tag qualification.local/fedora:f1 ghcr.io/pichi-vm/fedora:43
+          sed -i 's/!bootstrap //' pichi.yaml
+          pichi update --pull=never
+          git add pichi.yaml pichi.lock
+          git -c user.name="Pichi CI" -c user.email="ci@pichi.invalid" \
+            commit -m "test: use the first Fedora image as input"
+          git bundle create .build/successor.bundle HEAD
+          pichi build . --ref HEAD --build-image "$BUILD_IMAGE" --memory 8192 \
+            -t qualification.local/fedora:f2
+          pichi inspect qualification.local/fedora:f2 > .build/f2.json
+          test "$(pichi inspect qualification.local/fedora:f2 --format \
+            '{{ manifest.annotations["dev.pichi.build.commit"] }}')" = "sha1:$(git rev-parse HEAD)"
+          test "$(pichi inspect qualification.local/fedora:f2 --format \
+            '{{ "dev.pichi.build.bootstrapped" in manifest.annotations }}')" = false
+          test "$(pichi inspect qualification.local/fedora:f2 --format \
+            '{{ manifest.annotations["dev.pichi.build.lock"] }}')" = pichi.lock
+          grep -F "$(pichi inspect qualification.local/fedora:f1 --format '{{ digest }}')" pichi.lock
+
+          pichi build . --ref "$original" --build-image "$BUILD_IMAGE" --memory 8192 \
+            -t ghcr.io/pichi-vm/fedora:43
+          pichi inspect ghcr.io/pichi-vm/fedora:43 > .build/recursive.json
+          test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
+            '{{ manifest.annotations["dev.pichi.build.commit"] }}')" = "sha1:$original"
+          test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
+            '{{ manifest.annotations["dev.pichi.build.bootstrapped"] }}')" = true
+          test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
+            '{{ "dev.pichi.build.lock" in manifest.annotations }}')" = false
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selfhost-evidence-${{ matrix.arch }}
+          path: |
+            .build/*.json
+            .build/successor.bundle
+          include-hidden-files: true
+
       - name: Export production image
         run: pichi save qualification.local/fedora:f1 -o "oci-${{ matrix.arch }}"
 
