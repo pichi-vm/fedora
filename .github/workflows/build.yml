@@ -13,7 +13,7 @@ defaults:
 env:
   RELEASE: "43"
   NIGHTLY: "nightly-2026-07-06"
-  PICHI_REV: "1ca6ef6eb7788feac815f7d0bad7ff515116e42e"
+  PICHI_REV: "64de966bc4887216740d6fafd40be8fadd507c22"
   DILLO_REV: "4afc85c8580f763f0cb68472701e1ff9e261e250"
   BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:262f87ecd7a178a90979eebd9689a0a28c1a4d844e6572a0fea116bf782a0b6f"
 
