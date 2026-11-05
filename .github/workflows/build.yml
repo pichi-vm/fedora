@@ -13,7 +13,6 @@ defaults:
 env:
   RELEASE: "43"
   NIGHTLY: "nightly-2026-07-06"
-  DILLO_REV: "4afc85c8580f763f0cb68472701e1ff9e261e250"
   BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:262f87ecd7a178a90979eebd9689a0a28c1a4d844e6572a0fea116bf782a0b6f"
 
 jobs:
@@ -109,10 +108,8 @@ jobs:
           rustup toolchain install "$NIGHTLY" --profile minimal
           (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
           echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
-          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/dillo "$RUNNER_TEMP/dillo"
-          git -C "$RUNNER_TEMP/dillo" checkout --detach "$DILLO_REV"
-          (cd "$RUNNER_TEMP/dillo" && cargo "+$NIGHTLY" --config packaging/cargo-config.toml build --locked --release --bin dillo)
-          echo "PICHI_DILLO=$RUNNER_TEMP/dillo/target/release/dillo" >> "$GITHUB_ENV"
+          (cd sources/dillo && cargo "+$NIGHTLY" --config packaging/cargo-config.toml build --locked --release --bin dillo)
+          echo "PICHI_DILLO=$GITHUB_WORKSPACE/sources/dillo/target/release/dillo" >> "$GITHUB_ENV"
           echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
 
       - name: Download native tool image

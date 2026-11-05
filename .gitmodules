@@ -7,3 +7,6 @@
 [submodule "sources/pichi"]
 	path = sources/pichi
 	url = https://github.com/pichi-vm/pichi
+[submodule "sources/dillo"]
+	path = sources/dillo
+	url = https://github.com/pichi-vm/dillo
