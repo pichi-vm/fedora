@@ -13,7 +13,6 @@ defaults:
 env:
   RELEASE: "43"
   NIGHTLY: "nightly-2026-07-06"
-  PICHI_REV: "64de966bc4887216740d6fafd40be8fadd507c22"
   DILLO_REV: "4afc85c8580f763f0cb68472701e1ff9e261e250"
   BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:262f87ecd7a178a90979eebd9689a0a28c1a4d844e6572a0fea116bf782a0b6f"
 
@@ -39,13 +38,15 @@ jobs:
     permissions:
       contents: read
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
       - name: Build Pichi
         run: |
           rustup toolchain install "$NIGHTLY" --profile minimal
-          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/pichi "$RUNNER_TEMP/pichi"
-          git -C "$RUNNER_TEMP/pichi" checkout --detach "$PICHI_REV"
-          (cd "$RUNNER_TEMP/pichi" && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          echo "$RUNNER_TEMP/pichi/target/release" >> "$GITHUB_PATH"
+          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
+          echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
           echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
 
       - name: Obtain the Fedora tool image
@@ -106,10 +107,8 @@ jobs:
       - name: Build Pichi and Dillo
         run: |
           rustup toolchain install "$NIGHTLY" --profile minimal
-          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/pichi "$RUNNER_TEMP/pichi"
-          git -C "$RUNNER_TEMP/pichi" checkout --detach "$PICHI_REV"
-          (cd "$RUNNER_TEMP/pichi" && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          echo "$RUNNER_TEMP/pichi/target/release" >> "$GITHUB_PATH"
+          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
+          echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
           git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/dillo "$RUNNER_TEMP/dillo"
           git -C "$RUNNER_TEMP/dillo" checkout --detach "$DILLO_REV"
           (cd "$RUNNER_TEMP/dillo" && cargo "+$NIGHTLY" --config packaging/cargo-config.toml build --locked --release --bin dillo)
@@ -197,13 +196,15 @@ jobs:
       contents: read
       packages: write
     steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          submodules: recursive
+
       - name: Install pichi
         run: |
           rustup toolchain install "$NIGHTLY" --profile minimal
-          git clone --filter=blob:none --no-checkout https://github.com/pichi-vm/pichi /tmp/pichi
-          git -C /tmp/pichi checkout --detach "$PICHI_REV"
-          (cd /tmp/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          sudo install -m755 /tmp/pichi/target/release/pichi /usr/local/bin/pichi
+          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
+          sudo install -m755 sources/pichi/target/release/pichi /usr/local/bin/pichi
 
       - name: Download OCI layout artifacts
         uses: actions/download-artifact@v4

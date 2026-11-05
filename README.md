@@ -6,9 +6,10 @@ requirements for booting Fedora with `pichi run`.
 
 ## Build
 
-Use a native Linux/KVM host, Pichi and Dillo at the revisions pinned in
-[the workflow](.github/workflows/build.yml), and 4096 available 2 MiB hugepages
-for the 8 GiB build VM. Set `PICHI_DILLO` if Dillo is not beside Pichi.
+Use a native Linux/KVM host, Pichi from [sources/pichi](sources/pichi), Dillo
+at the revision pinned in [the workflow](.github/workflows/build.yml), and
+4096 available 2 MiB hugepages for the 8 GiB build VM. Set `PICHI_DILLO` if
+Dillo is not beside Pichi.
 With a published Fedora tool image available:
 
 ```sh

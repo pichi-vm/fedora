@@ -4,3 +4,6 @@
 [submodule "sources/corium"]
 	path = sources/corium
 	url = https://github.com/pichi-vm/corium
+[submodule "sources/pichi"]
+	path = sources/pichi
+	url = https://github.com/pichi-vm/pichi
