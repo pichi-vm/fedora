@@ -64,7 +64,8 @@ jobs:
             pichi import raw .build/bootstrap.raw -t ghcr.io/pichi-vm/fedora:43
           fi
           pichi inspect ghcr.io/pichi-vm/fedora:43 > .build/seed.json
-          pichi save ghcr.io/pichi-vm/fedora:43 -o .build/tool-image
+          manifest=$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format '{{ manifest_digest }}')
+          pichi save "ghcr.io/pichi-vm/fedora@$manifest" -o .build/tool-image
 
       - name: Upload native tool image
         uses: actions/upload-artifact@v4
