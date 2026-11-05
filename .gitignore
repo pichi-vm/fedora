@@ -1,5 +1,3 @@
-# Build artifacts (everything mkosi + build.sh emit lands under .build/)
+# Build artifacts
 /.build/
-/mkosi.output/
 /_karpathy-loop/
-__pycache__/
