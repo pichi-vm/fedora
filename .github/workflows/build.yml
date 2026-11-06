@@ -41,9 +41,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install toolchain
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
+        with:
+          workspaces: sources/pichi -> target
+
       - name: Build Pichi
         run: |
-          rustup toolchain install "$NIGHTLY" --profile minimal
           (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
           echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
           echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
@@ -103,9 +111,24 @@ jobs:
           test -r /dev/kvm && test -w /dev/kvm
           test "$(cat /proc/sys/vm/nr_hugepages)" -ge 4096
 
+      - name: Install toolchain
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
+        with:
+          workspaces: |
+            sources/pichi -> target
+            sources/dillo -> target
+          cache-targets: false
+          cache-directories: |
+            ${{ github.workspace }}/sources/pichi/target
+            ${{ github.workspace }}/sources/dillo/target
+          save-if: ${{ runner.environment == 'github-hosted' || github.ref == 'refs/heads/main' }}
+
       - name: Build Pichi and Dillo
         run: |
-          rustup toolchain install "$NIGHTLY" --profile minimal
           (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
           echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
           (cd sources/dillo && cargo "+$NIGHTLY" --config packaging/cargo-config.toml build --locked --release --bin dillo)
@@ -197,9 +220,17 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Install toolchain
+        run: rustup toolchain install "$NIGHTLY" --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        env:
+          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
+        with:
+          workspaces: sources/pichi -> target
+
       - name: Install pichi
         run: |
-          rustup toolchain install "$NIGHTLY" --profile minimal
           (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
           sudo install -m755 sources/pichi/target/release/pichi /usr/local/bin/pichi
 
