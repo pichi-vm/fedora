@@ -33,9 +33,9 @@ class Selection(unittest.TestCase):
         identity = 'a' * 64
         matching = {'id': 3, 'state': 'succeeded',
                     'chroots': ['fedora-43-x86_64', 'fedora-43-aarch64'],
-                    'source_package': {'version': '0.1-3.123.g' + identity[:16]}}
+                    'source_package': {'name': 'arma', 'version': '0.1-3.123.g' + identity[:16]}}
         candidates = [
-            {**matching, 'id': 1, 'source_package': {'version': '0.1-3.123.g' + 'b' * 16}},
+            {**matching, 'id': 1, 'source_package': {'name': 'arma', 'version': '0.1-3.123.g' + 'b' * 16}},
             {**matching, 'id': 2, 'chroots': ['fedora-43-x86_64']}, matching]
         client = copr.Copr('pichi-staging')
         with patch.object(client, 'request', return_value={'items': candidates}):
@@ -44,7 +44,7 @@ class Selection(unittest.TestCase):
     def test_failed_build_is_never_reused(self):
         client = copr.Copr('pichi-staging')
         with patch.object(client, 'request', return_value={'items': [
-                {'id': 1, 'state': 'failed', 'source_package': {'version': '0.1-3.g' + 'a' * 16}}]}):
+                {'id': 1, 'state': 'failed', 'source_package': {'name': 'arma', 'version': '0.1-3.g' + 'a' * 16}}]}):
             self.assertIsNone(client.find('arma', 'a' * 64, 'c' * 40))
 
     def test_unsigned_rpm_is_rejected_even_when_digests_pass(self):

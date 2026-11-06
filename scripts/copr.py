@@ -57,12 +57,16 @@ class Copr:
         name = 'dillo-vm' if package == 'dillo' else package
         offset = 0
         while True:
+            # SCM submissions are not associated with a package name until
+            # their SRPM exists. Include unnamed source builds in this query.
             query = urllib.parse.urlencode(dict(ownername=OWNER, projectname=self.project,
-                                                packagename=name, limit=100, offset=offset))
+                                                limit=100, offset=offset))
             builds = self.request('build/list?' + query)['items']
             for build in builds:
                 version = (build.get('source_package') or {}).get('version') or ''
-                if build['state'] not in FAILED and version.endswith('.g' + identity[:16]):
+                if (build['state'] not in FAILED
+                        and (build.get('source_package') or {}).get('name') == name
+                        and version.endswith('.g' + identity[:16])):
                     if all(f'fedora-43-{arch}' in build['chroots'] for arch in ARCHES):
                         return build['id']
                 elif build['state'] not in FAILED | {'succeeded'}:
