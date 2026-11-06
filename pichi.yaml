@@ -26,43 +26,20 @@ stages:
       /var: tmpfs
     steps:
       - exec:
-          command: >-
-            dnf -y --setopt=install_weak_deps=False install
-            gcc rust cargo lld glibc-static
-            "rust-std-static-$(uname -m)-unknown-none*"
-          network: true
-  arma:
-    use: tools
-    steps:
-      - copy: { path: sources/arma, into: /build/arma/ }
-      - exec:
           command: |
-            cd /build/arma
-            RUSTC_BOOTSTRAP=1 cargo build --locked --release --bin arma
-            install -m0755 target/release/arma /mnt/arma
-          network: true
-  corium:
-    use: tools
-    steps:
-      - copy: { path: sources/corium, into: /build/corium/ }
-      - exec:
-          command: |
-            cd /build/corium
-            cargo rustc --locked --release --bin corium \
-              -- -C target-feature=+crt-static
-            install -m0755 target/release/corium /mnt/corium
+            dnf -y --setopt=install_weak_deps=False install dnf5-plugins
+            dnf -y copr enable npmccallum/pichi-staging
+            dnf -y --refresh --setopt=install_weak_deps=False install arma corium
           network: true
   firmware:
-    extend: rootfs
+    extend: tools
     mounts:
       /tmp: tmpfs
     steps:
-      - copy: { from: arma, path: /arma, into: /tmp/arma }
-      - copy: { from: corium, path: /corium, into: /tmp/corium }
       - exec:
           command: >-
-            /tmp/arma build --kernel /usr/lib/modules/*/vmlinuz
-            --config /usr/lib/modules/*/config --initrd /tmp/corium
+            /usr/bin/arma build --kernel /usr/lib/modules/*/vmlinuz
+            --config /usr/lib/modules/*/config --initrd /usr/bin/corium
             --module virtio_pci --module virtio_blk --module virtio_console
             --module dm_mod --module dm_zero --module dm_snapshot
             --module dm_verity --module ext4
