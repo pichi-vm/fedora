@@ -1,0 +1,111 @@
+name: COPR staging bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full commit SHA in pichi-vm/fedora to package
+        required: true
+        type: string
+      packages:
+        description: Comma-separated package directories (corium,arma,dillo,pichi)
+        default: corium,arma,dillo,pichi
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copr-staging-bootstrap
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Do not check out or execute the requested revision with credentials.
+      - name: Validate the requested source commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ inputs.revision }}
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PACKAGES" =~ ^(corium|arma|dillo|pichi)(,(corium|arma|dillo|pichi))*$ ]]
+          test "$(gh api "repos/pichi-vm/fedora/commits/$REVISION" --jq .sha)" = "$REVISION"
+
+      - name: Disable duplicate staging webhooks and submit
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+          REVISION: ${{ inputs.revision }}
+          PACKAGES: ${{ inputs.packages }}
+        run: |
+          umask 077
+          f=$(mktemp)
+          trap 'rm -f "$f"' EXIT
+          printf '%s' "$COPR_CONFIG" > "$f"
+          unset COPR_CONFIG
+          python3 - "$f" <<'PY'
+          import base64
+          import configparser
+          import json
+          import os
+          from pathlib import Path
+          import sys
+          import urllib.request
+
+          config = configparser.ConfigParser(interpolation=None)
+          config.read(sys.argv[1])
+          credentials = config['copr-cli']
+          base = 'https://copr.fedorainfracloud.org'
+          assert credentials['copr_url'].rstrip('/') == base
+          authorization = base64.b64encode(
+              f"{credentials['login']}:{credentials['token']}".encode()).decode()
+
+          def request(endpoint, data=None):
+              headers = {'Accept': 'application/json'}
+              payload = None
+              if data is not None:
+                  headers.update({'Content-Type': 'application/json',
+                                  'Authorization': 'Basic ' + authorization})
+                  payload = json.dumps(data).encode()
+              req = urllib.request.Request(base + '/api_3/' + endpoint,
+                                           data=payload, headers=headers)
+              with urllib.request.urlopen(req, timeout=120) as response:
+                  return json.load(response)
+
+          owner, project = 'npmccallum', 'pichi-staging'
+          # Disable only the existing staging source triggers. Keep their
+          # definitions, and leave production and GitHub webhooks untouched.
+          for package in request(f'package/list?ownername={owner}&projectname={project}')['items']:
+              if package['name'] in ('corium', 'arma', 'dillo-vm', 'pichi') and package['auto_rebuild']:
+                  request(f"package/edit/{owner}/{project}/{package['name']}/scm",
+                          {**package['source_dict'], 'webhook_rebuild': False})
+
+          builds = {'revision': os.environ['REVISION'], 'project': f'{owner}/{project}', 'builds': {}}
+          try:
+              for package in dict.fromkeys(os.environ['PACKAGES'].split(',')):
+                  result = request('build/create/scm', {
+                      'ownername': owner, 'projectname': project,
+                      'clone_url': 'https://github.com/pichi-vm/fedora.git',
+                      'committish': os.environ['REVISION'],
+                      'subdirectory': f'packaging/{package}', 'spec': f'{package}.spec',
+                      'scm_type': 'git', 'source_build_method': 'make_srpm',
+                      'chroots': ['fedora-43-x86_64', 'fedora-43-aarch64'],
+                      'enable_net': False,
+                  })
+                  builds['builds'][package] = result['id']
+                  print(f"{package}: https://copr.fedorainfracloud.org/coprs/build/{result['id']}/")
+          finally:
+              Path('copr-builds.json').write_text(json.dumps(builds, indent=2) + '\n')
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: copr-builds
+          path: copr-builds.json
+          if-no-files-found: warn
