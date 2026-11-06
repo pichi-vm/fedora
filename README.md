@@ -16,7 +16,7 @@ With a published Fedora tool image available:
 git submodule update --init --recursive
 pichi pull ghcr.io/pichi-vm/fedora:43
 pichi build . --ref HEAD --memory 8192 \
-  --build-image ghcr.io/pichi-vm/conglobate@sha256:2239264c3281d53beedabdbfe8b3c587ac8ff8f2e87d4642e192f943f6cd5c45 \
+  --build-image ghcr.io/pichi-vm/conglobate@sha256:dda6d25f6f51ad171611f159f4202bdec4e50482d6e741ad566c1b4d7c61d946 \
   -t ghcr.io/pichi-vm/fedora:43
 ```
 
