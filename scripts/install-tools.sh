@@ -26,7 +26,7 @@ for package, entry in lock['packages'].items():
 PYCODE
 export PICHI_DILLO=/usr/bin/dillo
 pichi --version
-dillo --version
+dillo --help >/dev/null
 arma --help >/dev/null
 printf '%s\n' 'PICHI_DILLO=/usr/bin/dillo' >> "$GITHUB_ENV"
 printf 'XDG_DATA_HOME=%s/fedora-image-cache\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
