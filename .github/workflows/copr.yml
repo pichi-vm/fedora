@@ -1,6 +1,17 @@
 name: COPR packages
 
 on:
+  workflow_call:
+    inputs:
+      revision:
+        type: string
+        default: ''
+      project:
+        type: string
+        default: pichi-staging
+      packages:
+        type: string
+        default: '["corium", "arma", "dillo", "pichi", "madrillo"]'
   workflow_dispatch:
     inputs:
       revision:
@@ -29,28 +40,45 @@ jobs:
       fail-fast: false
       matrix:
         package: ${{ fromJSON(inputs.packages) }}
-    concurrency:
-      group: copr-${{ inputs.project }}-${{ matrix.package }}
-      cancel-in-progress: false
     steps:
-      - name: Install COPR client
-        run: pipx install copr-cli
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - name: Submit and wait for both architectures
         shell: bash
         env:
           COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
-          REVISION: ${{ inputs.revision }}
+          REVISION: ${{ inputs.revision || github.sha }}
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
           PROJECT: ${{ inputs.project }}
           PACKAGE: ${{ matrix.package }}
         run: |
           [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
           case "$PROJECT" in pichi|pichi-staging) ;; *) exit 1 ;; esac
           case "$PACKAGE" in corium|arma|dillo|pichi|madrillo) ;; *) exit 1 ;; esac
+          if [[ "$EVENT" == push && "$BEFORE" != 0000000000000000000000000000000000000000 ]] &&
+              git diff --quiet "$BEFORE" "$REVISION" -- .copr .gitmodules .github/workflows/copr.yml "packaging/$PACKAGE" "sources/$PACKAGE"; then
+            echo "Reusing unchanged $PACKAGE RPMs"
+            exit 0
+          fi
+          pipx install copr-cli
           umask 077
           config=$(mktemp)
           trap 'rm -f "$config"' EXIT
           printf '%s' "$COPR_CONFIG" > "$config"
           unset COPR_CONFIG
+          name=$PACKAGE
+          if [[ "$name" == dillo ]]; then name=dillo-vm; fi
+          action=add-package-scm
+          if copr-cli --config "$config" get-package "npmccallum/$PROJECT" --name "$name" >/dev/null 2>&1; then
+            action=edit-package-scm
+          fi
+          copr-cli --config "$config" "$action" "npmccallum/$PROJECT" \
+            --name "$name" --clone-url https://github.com/pichi-vm/fedora.git \
+            --commit main --subdir "packaging/$PACKAGE" --spec "$PACKAGE.spec" \
+            --method make_srpm --webhook-rebuild off
           copr-cli --config "$config" buildscm "npmccallum/$PROJECT" \
             --clone-url https://github.com/pichi-vm/fedora.git \
             --commit "$REVISION" --subdir "packaging/$PACKAGE" \
