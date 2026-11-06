@@ -24,7 +24,8 @@ where Dillo needs its pinned nightly. Corium is linked statically for `/init`.
 GitHub runners do not prepare SRPMs or compile these tools.
 
 Package releases include the input timestamp and a content hash. The hash
-covers the source gitlink, spec, packaging patches, and source preparation.
+covers the source gitlink, spec, packaging patches, and source preparation. Historical upstream packaging directories are
+removed from source exports before applying this repository’s recipes.
 Image-only changes reuse successful builds. `scripts/copr.py` rejects failed
 builds, missing architectures, unexpected package identities, invalid RPM
 signatures, and checksum mismatches. Trusted keys are committed in `keys/`.

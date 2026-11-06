@@ -80,6 +80,12 @@ def prepare(project, out):
         work = Path(temporary)
         src = work / stem
         export(repo, pin, src)
+        # Historical source pins may predate the upstream cleanup. Packaging
+        # is supplied exclusively by this repository, even for those pins.
+        for directory in ('.copr', 'packaging', 'debian'):
+            shutil.rmtree(src / directory, ignore_errors=True)
+        if project == 'pichi':
+            (src / 'tests/packaging.rs').unlink(missing_ok=True)
         (src / 'packaging').mkdir(exist_ok=True)
         (src / 'package-source.json').write_text(json.dumps(
             {'source': pin, 'input': identity}, sort_keys=True) + '\n')
