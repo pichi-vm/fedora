@@ -1,3 +1,6 @@
 # Build artifacts
 /.build/
 /_karpathy-loop/
+
+# Python checks
+__pycache__/
