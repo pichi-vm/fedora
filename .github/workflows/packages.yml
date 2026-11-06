@@ -1,0 +1,49 @@
+name: packages
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copr-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    container: registry.fedoraproject.org/fedora:43
+    steps:
+      - name: Install orchestration tools
+        run: dnf -y install git python3 rpm
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check source preparation and selection
+        run: python3 -m unittest discover -s tests -v
+      - name: Submit missing packages from trusted main
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: |
+          umask 077
+          config=$(mktemp)
+          trap 'rm -f "$config"' EXIT
+          printf '%s' "$COPR_CONFIG" > "$config"
+          unset COPR_CONFIG
+          python3 scripts/copr.py resolve --project pichi-staging \
+            --config "$config" --submit --out .build/packages
+      - name: Resolve already submitted packages without credentials
+        if: github.ref != 'refs/heads/main' || (github.event_name != 'push' && github.event_name != 'workflow_dispatch')
+        run: python3 scripts/copr.py resolve --project pichi-staging --out .build/packages
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: package-inputs
+          path: .build/packages
+          if-no-files-found: warn
+          retention-days: 30

@@ -6,46 +6,77 @@ requirements for booting Fedora with `pichi run`.
 
 ## Build
 
-Use a native Linux/KVM host, Pichi and Dillo from their
-[sources/pichi](sources/pichi) and [sources/dillo](sources/dillo) submodules, and
-4096 available 2 MiB hugepages for the 8 GiB build VM. Set `PICHI_DILLO` if
-Dillo is not beside Pichi.
-With a published Fedora tool image available:
+Use a native Linux/KVM host with a Fedora 43 userspace, Pichi and Dillo
+installed from the selected COPR package set, and 4096 available 2 MiB
+hugepages for the 8 GiB build VM. CI uses Fedora containers on its native
+Ubuntu and NixOS hosts. Set `PICHI_DILLO=/usr/bin/dillo`.
+
+## Packages and source ownership
+
+This repository owns Fedora RPM definitions for Corium, Arma, Dillo, Pichi,
+and Madrillo. The `sources/*` gitlinks pin upstream code. Madrillo is packaged
+independently; it is not an input to this image recipe.
+
+COPR runs `.copr/Makefile` to prepare one SRPM per package, then compiles it
+natively for Fedora 43 x86_64 and aarch64 with networking disabled. Source
+preparation vendors locked dependencies and includes both host toolchains
+where Dillo needs its pinned nightly. Corium is linked statically for `/init`.
+GitHub runners do not prepare SRPMs or compile these tools.
+
+Package releases include the input timestamp and a content hash. The hash
+covers the source gitlink, spec, packaging patches, and source preparation.
+Image-only changes reuse successful builds. `scripts/copr.py` rejects failed
+builds, missing architectures, unexpected package identities, invalid RPM
+signatures, and checksum mismatches. Trusted keys are committed in `keys/`.
+
+Trusted main runs submit missing packages using the repository's `COPR_CONFIG`
+secret. PRs only resolve existing public results. A maintainer can use the
+**COPR staging bootstrap** workflow on main to submit a PR's exact canonical
+repository commit. A missing package fails the package check before an image
+job acquires a native runner; it does not silently use an older version.
+
+For local preparation of image inputs, after the selected packages have built:
 
 ```sh
-git submodule update --init --recursive
+python3 scripts/copr.py resolve --project pichi-staging --out .build/packages
+cp .build/packages/packages.lock.json packages.lock.json
+git add packages.lock.json
+git commit -m 'build: lock verified COPR package inputs'
 pichi pull ghcr.io/pichi-vm/fedora:43
 pichi build . --ref HEAD --memory 8192 \
   --build-image ghcr.io/pichi-vm/conglobate@sha256:2239264c3281d53beedabdbfe8b3c587ac8ff8f2e87d4642e192f943f6cd5c45 \
   -t ghcr.io/pichi-vm/fedora:43
 ```
 
-The build uses committed sources, including the Arma and Corium submodule
-pins. The stages install the root filesystem, extend it with Fedora's Rust
-toolchain, compile Arma and Corium separately, and assemble the boot payload.
-Arma selects the required kernel modules and constructs the initramfs. The
-package-install stages mount `/run`, `/tmp` and `/var` as tmpfs so their
-transient state is not included in the image.
+The lock records exact COPR builds, source revisions, signing-key identity,
+and RPM checksums for both architectures. CI creates a deterministic commit
+containing that lock before invoking `pichi build`; it retains the input Git
+bundle with its qualification evidence. The committed recipe installs Arma
+and Corium in temporary stages, leaving build tools out of the final root.
 
-## Bootstrap and CI
+## Bootstrap and qualification
 
-CI first tries to pull the published Fedora image. If unavailable, inline
-workflow steps use Ubuntu's DNF to install only enough Fedora packages to run
-DNF, create a bare ext4 image with `mkfs.ext4 -d`, and import it under the same
-`ghcr.io/pichi-vm/fedora:43` name. This initial tool image is never published.
-Both paths then run the same `pichi build` recipe.
+CI first tries the published Fedora image. If unavailable, it constructs a
+minimal DNF-capable ext4 seed in Fedora userspace and imports it. Both paths
+then run the same `pichi build` recipe. The initial seed is not published.
 
-The recipe marks that tool input `!bootstrap`, so it needs no `pichi.lock`.
-The output manifest has `dev.pichi.build.bootstrapped=true`, identifying the
-unlocked input boundary. Pichi resolves the cached input before replacing its
-tag, so the produced image can serve as the next build's tool image.
+The tool input is marked `!bootstrap`, so it needs no `pichi.lock`. CI builds
+the first image, uses it for a locked successor, and rebuilds the bootstrap
+recipe under its input name. It checks provenance annotations and boots the
+produced image through packaged Pichi and Dillo to a console login on both
+native architectures. The boot check terminates the guest afterward; it does
+not claim a graceful shutdown.
 
-On both native amd64 and arm64 KVM runners, CI builds the first image, uses it
-for an ordinary locked successor, and rebuilds the bootstrap recipe under its
-input name. It checks the output manifest annotations and retains image
-metadata and the successor's committed source in a Git bundle. The jobs
-exercise image production and reuse; they do not test the output's login boot.
-Only main publishes the combined multi-architecture index; PRs publish nothing.
+Only qualified main runs publish the multi-architecture image index. Before
+publication, the exact signed RPM set and package manifest are archived in a
+`rpms-<input-set>` GitHub prerelease, independently of COPR retention. Downloads
+prefer that archive and verify the same checksums and signatures. Existing
+archive contents are not overwritten. Published input sets can be reused for
+rollback without rebuilding the application sources.
+
+The current integration uses `npmccallum/pichi-staging`. Production cutover
+must switch the resolver to `npmccallum/pichi` only after both architectures
+pass qualification and upstream packaging triggers have been retired.
 
 ## Trademark
 

@@ -29,7 +29,7 @@ class CoprMakefileTests(unittest.TestCase):
             return result, calls, work
 
     def test_each_package_from_copr_working_directory(self):
-        for project in ('corium', 'arma', 'dillo', 'pichi'):
+        for project in ('corium', 'arma', 'dillo', 'pichi', 'madrillo'):
             with self.subTest(project=project):
                 result, calls, work = self.invoke(project)
                 self.assertEqual(result.returncode, 0, result.stderr)

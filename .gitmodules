@@ -10,3 +10,6 @@
 [submodule "sources/dillo"]
 	path = sources/dillo
 	url = https://github.com/pichi-vm/dillo
+[submodule "sources/madrillo"]
+	path = sources/madrillo
+	url = https://github.com/pichi-vm/madrillo

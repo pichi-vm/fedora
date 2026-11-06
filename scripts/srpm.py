@@ -151,7 +151,7 @@ EOF
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('project', choices=('corium', 'arma', 'dillo', 'pichi'))
+    parser.add_argument('project', choices=('corium', 'arma', 'dillo', 'pichi', 'madrillo'))
     parser.add_argument('--out', required=True, type=Path)
     args = parser.parse_args()
     args.out = args.out.resolve()

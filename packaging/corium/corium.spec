@@ -2,7 +2,6 @@
 %global cargo_install_bin 1
 
 %global crate corium
-%global build_rustflags %{build_rustflags} -C target-feature=+crt-static
 
 Name:           corium
 Version:        0.2.0
@@ -60,7 +59,7 @@ export CARGO=/usr/bin/cargo
 export RUSTC=%{__rustc}
 export RUSTC_BOOTSTRAP=1
 export CARGO_NET_OFFLINE=true
-%cargo_build -- --locked
+%{__cargo} rustc --locked --offline --profile rpm --bin corium -- -C target-feature=+crt-static
 %{cargo_license_summary}
 %{cargo_license} > LICENSE.dependencies
 
@@ -68,7 +67,7 @@ export CARGO_NET_OFFLINE=true
 export CARGO=/usr/bin/cargo
 export RUSTC=%{__rustc}
 export CARGO_NET_OFFLINE=true
-%cargo_install -- --locked
+install -Dpm0755 target/rpm/corium %{buildroot}%{_bindir}/corium
 
 %check
 # PID 1 must run before any shared libraries are mounted.

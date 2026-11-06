@@ -12,7 +12,6 @@ defaults:
 
 env:
   RELEASE: "43"
-  NIGHTLY: "nightly-2026-07-06"
   BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:2239264c3281d53beedabdbfe8b3c587ac8ff8f2e87d4642e192f943f6cd5c45"
 
 jobs:
@@ -23,8 +22,15 @@ jobs:
     permissions:
       contents: read
 
-  # Prepare native seeds on Ubuntu; the ARM KVM runner uses NixOS.
+  packages:
+    uses: ./.github/workflows/packages.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  # Fedora userspace runs packaged tools on Ubuntu and NixOS hosts.
   tool-image:
+    needs: [packages, checks]
     strategy:
       fail-fast: false
       matrix:
@@ -34,41 +40,37 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    container:
+      image: registry.fedoraproject.org/fedora:43
+      options: --privileged
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
+      - name: Install runtime tools
+        run: dnf -y install git python3 rpm e2fsprogs procps-ng
       - uses: actions/checkout@v7.0.1
         with:
           submodules: recursive
 
-      - name: Install toolchain
-        run: rustup toolchain install "$NIGHTLY" --profile minimal
-
-      - uses: Swatinem/rust-cache@v2
-        env:
-          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
+      - uses: actions/download-artifact@v4
         with:
-          workspaces: sources/pichi -> target
-
-      - name: Build Pichi
-        run: |
-          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
-          echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
+          name: package-inputs
+          path: .build/packages
+      - name: Install verified COPR tools
+        run: bash scripts/install-tools.sh
 
       - name: Obtain the Fedora tool image
         run: |
           mkdir -p .build
           if ! pichi pull ghcr.io/pichi-vm/fedora:43; then
-            sudo apt-get update
-            sudo apt-get install -y dnf rpm e2fsprogs
-            sudo dnf -y --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 \
+            dnf -y --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 \
               --repofrompath=fedora,https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/$(uname -m)/os/ \
               --repo=fedora --setopt=fedora.gpgkey=https://fedoraproject.org/fedora.gpg \
               --setopt=gpgcheck=1 --setopt=install_weak_deps=False install \
               filesystem bash coreutils dnf glibc-minimal-langpack ca-certificates
-            sudo dnf --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 clean all
-            sudo mkfs.ext4 -F -d "$RUNNER_TEMP/fedora-root" .build/bootstrap.raw 1G
+            dnf --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 clean all
+            mkfs.ext4 -F -d "$RUNNER_TEMP/fedora-root" .build/bootstrap.raw 1G
             pichi import raw .build/bootstrap.raw -t ghcr.io/pichi-vm/fedora:43
           fi
           pichi inspect ghcr.io/pichi-vm/fedora:43 > .build/seed.json
@@ -84,7 +86,7 @@ jobs:
           include-hidden-files: true
 
   build:
-    needs: tool-image
+    needs: [tool-image, packages, checks]
     strategy:
       fail-fast: false
       matrix:
@@ -94,9 +96,15 @@ jobs:
           - arch: arm64
             runner: [ self-hosted, Linux, ARM64, bare-metal, aarch64, kvm ]
     runs-on: ${{ matrix.runner }}
+    container:
+      image: registry.fedoraproject.org/fedora:43
+      options: --privileged
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
+      - name: Install runtime tools
+        run: dnf -y install git python3 rpm e2fsprogs procps-ng
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
@@ -105,41 +113,27 @@ jobs:
       - name: Reserve build VM memory
         run: |
           if [ "${{ matrix.arch }}" = amd64 ]; then
-            sudo chmod a+rw /dev/kvm
-            sudo sysctl -w vm.nr_hugepages=4096
+            chmod a+rw /dev/kvm
+            sysctl -w vm.nr_hugepages=4096
           fi
           test -r /dev/kvm && test -w /dev/kvm
           test "$(cat /proc/sys/vm/nr_hugepages)" -ge 4096
 
-      - name: Install toolchain
-        run: rustup toolchain install "$NIGHTLY" --profile minimal
-
-      - uses: Swatinem/rust-cache@v2
-        env:
-          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
+      - uses: actions/download-artifact@v4
         with:
-          workspaces: |
-            sources/pichi -> target
-            sources/dillo -> target
-          cache-targets: false
-          cache-directories: |
-            ${{ github.workspace }}/sources/pichi/target
-            ${{ github.workspace }}/sources/dillo/target
-          save-if: ${{ runner.environment == 'github-hosted' || github.ref == 'refs/heads/main' }}
-
-      - name: Build Pichi and Dillo
-        run: |
-          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
-          (cd sources/dillo && cargo "+$NIGHTLY" --config packaging/cargo-config.toml build --locked --release --bin dillo)
-          echo "PICHI_DILLO=$GITHUB_WORKSPACE/sources/dillo/target/release/dillo" >> "$GITHUB_ENV"
-          echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
+          name: package-inputs
+          path: .build/packages
+      - name: Install verified COPR tools
+        run: bash scripts/install-tools.sh
 
       - name: Download native tool image
         uses: actions/download-artifact@v4
         with:
           name: tool-image-${{ matrix.arch }}
           path: .build
+
+      - name: Commit exact package inputs
+        run: bash scripts/commit-package-inputs.sh
 
       - name: Build Fedora
         run: |
@@ -186,6 +180,9 @@ jobs:
           test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
             '{{ "dev.pichi.build.lock" in manifest.annotations }}')" = false
 
+      - name: Boot Fedora with packaged tools
+        run: python3 scripts/boot-check.py qualification.local/fedora:f1
+
       - name: Upload build evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -193,7 +190,9 @@ jobs:
           name: selfhost-evidence-${{ matrix.arch }}
           path: |
             .build/*.json
-            .build/successor.bundle
+            .build/*.bundle
+            .build/boot-console.log
+            packages.lock.json
           include-hidden-files: true
 
       - name: Export production image
@@ -210,29 +209,25 @@ jobs:
   index:
     # Feature branches and PRs validate both architectures without publishing.
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    needs: [build, checks]
-    runs-on: ubuntu-latest
+    needs: [build, checks, packages, archive-packages]
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:43
     permissions:
       contents: read
       packages: write
     steps:
+      - name: Install runtime tools
+        run: dnf -y install git python3 rpm e2fsprogs procps-ng
       - uses: actions/checkout@v7.0.1
         with:
           submodules: recursive
 
-      - name: Install toolchain
-        run: rustup toolchain install "$NIGHTLY" --profile minimal
-
-      - uses: Swatinem/rust-cache@v2
-        env:
-          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
+      - uses: actions/download-artifact@v4
         with:
-          workspaces: sources/pichi -> target
-
-      - name: Install pichi
-        run: |
-          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          sudo install -m755 sources/pichi/target/release/pichi /usr/local/bin/pichi
+          name: package-inputs
+          path: .build/packages
+      - name: Install verified COPR tools
+        run: bash scripts/install-tools.sh
 
       - name: Download OCI layout artifacts
         uses: actions/download-artifact@v4
@@ -260,9 +255,40 @@ jobs:
           pichi manifest create "$list" "${list}-amd64" "${list}-arm64" \
             -a "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             -a "org.opencontainers.image.revision=${{ github.sha }}" \
+            -a "dev.pichi.packages=$(python3 -c 'import json; print(json.load(open(".build/packages/packages.lock.json"))["set"])')" \
             -a "org.opencontainers.image.version=${RELEASE}" \
             -a "org.opencontainers.image.title=Fedora ${RELEASE}" \
             -a "org.opencontainers.image.description=Fedora ${RELEASE} base OS carapace for pichi"
           pichi manifest annotate "$list" "${list}-amd64" --os pichi --arch amd64
           pichi manifest annotate "$list" "${list}-arm64" --os pichi --arch arm64
           pichi manifest push "$list" "ghcr.io/${{ github.repository }}:${RELEASE}"
+
+  # Retain the signed RPMs independently of COPR's pruning policy.
+  archive-packages:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [build, packages]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package-inputs
+          path: packages
+      - name: Archive the qualified package set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REVISION: ${{ github.sha }}
+        run: |
+          set_id=$(python3 -c 'import json; print(json.load(open("packages/packages.lock.json"))["set"])')
+          tag="rpms-$set_id"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release download "$tag" --pattern packages.lock.json --dir existing
+            cmp packages/packages.lock.json existing/packages.lock.json
+          else
+            gh release create "$tag" --target "$REVISION" --prerelease \
+              --title "Qualified RPM inputs $set_id" \
+              --notes 'Signed COPR packages used by qualified Fedora image builds.' \
+              packages/*.rpm packages/packages.lock.json
+          fi

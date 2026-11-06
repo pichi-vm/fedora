@@ -14,7 +14,7 @@ make_srpm: srpm
 # Copr supplies absolute spec/outdir paths and calls srpm in the subdirectory.
 srpm:
 	project=$$(basename "$$(dirname "$${spec:?spec is required}")")
-	case "$$project" in corium|arma|dillo|pichi) ;; *) exit 2 ;; esac
+	case "$$project" in corium|arma|dillo|pichi|madrillo) ;; *) exit 2 ;; esac
 	test "$$(realpath "$$spec")" = "$$ROOT/packaging/$$project/$$project.spec"
 	: "$${outdir:?outdir is required}"
 	# The source builder includes make and dnf and permits network access.
