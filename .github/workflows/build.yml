@@ -23,8 +23,18 @@ jobs:
     permissions:
       contents: read
 
+  packages:
+    uses: ./.github/workflows/copr.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
   # Prepare native seeds on Ubuntu; the ARM KVM runner uses NixOS.
   tool-image:
+    needs: [packages, checks]
+    if: >-
+      always() && !cancelled() && needs.checks.result == 'success' &&
+      (needs.packages.result == 'success' || needs.packages.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:
@@ -85,6 +95,7 @@ jobs:
 
   build:
     needs: tool-image
+    if: ${{ !cancelled() && needs.tool-image.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
