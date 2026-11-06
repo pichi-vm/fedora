@@ -18,7 +18,7 @@ jobs:
     container: registry.fedoraproject.org/fedora:43
     steps:
       - name: Install orchestration tools
-        run: dnf -y install git python3 rpm
+        run: dnf -y install git python3 rpm make
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0

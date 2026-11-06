@@ -88,6 +88,28 @@ class Copr:
     def resolve(self, output, submit=False, timeout=5400):
         revision = subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip()
         identities = {package: package_identity(package) for package in PACKAGES}
+        key = ROOT / 'keys' / f'{self.project}.asc'
+        key_sha256 = hashlib.sha256(key.read_bytes()).hexdigest()
+        set_id = hashlib.sha256(json.dumps(
+            {'project': self.project, 'inputs': identities, 'key': key_sha256},
+            sort_keys=True).encode()).hexdigest()
+        output.mkdir(parents=True, exist_ok=True)
+        lockfile = output / 'packages.lock.json'
+        try:
+            fetch('https://github.com/pichi-vm/fedora/releases/download/'
+                  f'rpms-{set_id}/packages.lock.json', lockfile, attempts=1)
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+        else:
+            archived = json.loads(lockfile.read_text())
+            if (archived['inputs'] != identities or archived['project'] != self.project
+                    or archived['set'] != set_id or archived['key_sha256'] != key_sha256):
+                raise ValueError('Archived package set does not match selected inputs')
+            for arch in ARCHES:
+                download(lockfile, output, arch, PACKAGES)
+            print(f'Reused archived package set {set_id}', flush=True)
+            return
         builds, missing = {}, []
         for package, identity in identities.items():
             build = self.find(package, identity, revision)
@@ -121,11 +143,8 @@ class Copr:
         if failures:
             raise RuntimeError(f'COPR package failures: {failures}')
         result = {'version': 1, 'project': self.project, 'inputs': identities, 'packages': {}}
-        key = ROOT / 'keys' / f'{self.project}.asc'
-        result['key_sha256'] = hashlib.sha256(key.read_bytes()).hexdigest()
-        result['set'] = hashlib.sha256(json.dumps(
-            {'project': self.project, 'inputs': identities, 'key': result['key_sha256']},
-            sort_keys=True).encode()).hexdigest()
+        result['key_sha256'] = key_sha256
+        result['set'] = set_id
         for package, build in builds.items():
             name = 'dillo-vm' if package == 'dillo' else package
             source = self.request(f'build/source-build-config/{build}')['source_dict']
