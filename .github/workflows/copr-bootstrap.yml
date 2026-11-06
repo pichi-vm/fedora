@@ -83,7 +83,8 @@ jobs:
           for package in request(f'package/list?ownername={owner}&projectname={project}')['items']:
               if package['name'] in ('corium', 'arma', 'dillo-vm', 'pichi') and package['auto_rebuild']:
                   request(f"package/edit/{owner}/{project}/{package['name']}/scm",
-                          {**package['source_dict'], 'webhook_rebuild': False})
+                          {**package['source_dict'], 'package_name': package['name'],
+                           'webhook_rebuild': False})
 
           builds = {'revision': os.environ['REVISION'], 'project': f'{owner}/{project}', 'builds': {}}
           try:
