@@ -20,12 +20,31 @@ pichi build . --ref HEAD --memory 8192 \
   -t ghcr.io/pichi-vm/fedora:43
 ```
 
-The build uses committed sources, including the Arma and Corium submodule
-pins. The stages install the root filesystem, extend it with Fedora's Rust
-toolchain, compile Arma and Corium separately, and assemble the boot payload.
+The build installs Arma and Corium from COPR into a temporary tool stage
+and assembles the boot payload. The final root filesystem does not contain
+those build tools.
 Arma selects the required kernel modules and constructs the initramfs. The
 package-install stages mount `/run`, `/tmp` and `/var` as tmpfs so their
 transient state is not included in the image.
+
+## Packages
+
+Fedora owns the static specs and pinned application sources. COPR prepares
+one SRPM per package and builds both native architectures. Image qualification
+currently uses `npmccallum/pichi-staging`.
+
+Increment the affected spec's `Release` whenever its source pin, spec, or
+source-preparation recipe changes so DNF selects the new packages. Trusted
+main builds submit changed package inputs to COPR and wait for both
+architectures before image jobs start; image-only changes reuse existing RPMs.
+Keep automatic repository publication enabled: COPR waits for publication
+before reporting success. The image refreshes repository metadata before
+installing packages by name, with normal signature checks. PR jobs use already
+submitted packages without COPR credentials. Use the manual **COPR packages**
+workflow on main to submit a packaging revision explicitly.
+
+CI continues to build Pichi and Dillo from the pinned sources for its Ubuntu
+and NixOS hosts, using the existing Cargo caches.
 
 ## Bootstrap and CI
 
