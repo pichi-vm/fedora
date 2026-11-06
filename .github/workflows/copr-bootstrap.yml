@@ -1,8 +1,15 @@
-name: COPR staging bootstrap
+name: COPR package submission
 
 on:
   workflow_dispatch:
     inputs:
+      project:
+        description: COPR destination (production only after staging qualification)
+        type: choice
+        options:
+          - pichi-staging
+          - pichi
+        default: pichi-staging
       revision:
         description: Full commit SHA in pichi-vm/fedora to package
         required: true
@@ -37,9 +44,10 @@ jobs:
           [[ "$PACKAGES" =~ ^(corium|arma|dillo|pichi|madrillo)(,(corium|arma|dillo|pichi|madrillo))*$ ]]
           test "$(gh api "repos/pichi-vm/fedora/commits/$REVISION" --jq .sha)" = "$REVISION"
 
-      - name: Disable duplicate staging webhooks and submit
+      - name: Disable duplicate package webhooks and submit
         env:
           COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+          PROJECT: ${{ inputs.project }}
           REVISION: ${{ inputs.revision }}
           PACKAGES: ${{ inputs.packages }}
         run: |
@@ -77,11 +85,12 @@ jobs:
               with urllib.request.urlopen(req, timeout=120) as response:
                   return json.load(response)
 
-          owner, project = 'npmccallum', 'pichi-staging'
-          # Disable only the existing staging source triggers. Keep their
-          # definitions, and leave production and GitHub webhooks untouched.
+          owner, project = 'npmccallum', os.environ['PROJECT']
+          assert project in ('pichi-staging', 'pichi')
+          # Disable duplicate triggers only in the explicitly selected project.
+          # Exact-commit submissions supply their own source definitions.
           for package in request(f'package/list?ownername={owner}&projectname={project}')['items']:
-              if package['name'] in ('corium', 'arma', 'dillo-vm', 'pichi') and package['auto_rebuild']:
+              if package['name'] in ('corium', 'arma', 'dillo-vm', 'pichi', 'madrillo') and package['auto_rebuild']:
                   request(f"package/edit/{owner}/{project}/{package['name']}/scm",
                           {**package['source_dict'], 'package_name': package['name'],
                            'webhook_rebuild': False})

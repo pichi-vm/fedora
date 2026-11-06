@@ -4,6 +4,8 @@
 set -euo pipefail
 
 # Runs in Fedora userspace on either host architecture, before image work.
+git config --global --add safe.directory "$GITHUB_WORKSPACE"
+git config --global --add safe.directory "$GITHUB_WORKSPACE/*"
 directory=${1:-.build/packages}
 python3 scripts/copr.py download --lock "$directory/packages.lock.json" \
     --out "$directory" --arch "$(uname -m)"

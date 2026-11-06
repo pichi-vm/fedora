@@ -31,7 +31,7 @@ signatures, and checksum mismatches. Trusted keys are committed in `keys/`.
 
 Trusted main runs submit missing packages using the repository's `COPR_CONFIG`
 secret. PRs only resolve existing public results. A maintainer can use the
-**COPR staging bootstrap** workflow on main to submit a PR's exact canonical
+**COPR package submission** workflow on main to submit a PR's exact canonical
 repository commit. A missing package fails the package check before an image
 job acquires a native runner; it does not silently use an older version.
 

@@ -24,7 +24,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Check source preparation and selection
-        run: python3 -m unittest discover -s tests -v
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          python3 -m unittest discover -s tests -v
       - name: Submit missing packages from trusted main
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:

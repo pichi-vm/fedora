@@ -85,7 +85,29 @@ class Copr:
             'chroots': [f'fedora-43-{arch}' for arch in ARCHES], 'enable_net': False,
         })['id']
 
+    def configure_sources(self):
+        """Retire application-repository triggers after central packaging lands."""
+        query = urllib.parse.urlencode(dict(ownername=OWNER, projectname=self.project))
+        existing = {package['name']: package
+                    for package in self.request('package/list?' + query)['items']}
+        for package in (*PACKAGES, 'madrillo'):
+            name = 'dillo-vm' if package == 'dillo' else package
+            desired = {'package_name': name, 'type': 'git',
+                       'clone_url': 'https://github.com/pichi-vm/fedora.git',
+                       'committish': 'main', 'subdirectory': f'packaging/{package}',
+                       'spec': f'{package}.spec', 'source_build_method': 'make_srpm',
+                       'webhook_rebuild': False}
+            current = existing.get(name)
+            if current and not current['auto_rebuild'] and all(
+                    current['source_dict'].get(key) == value for key, value in desired.items()
+                    if key not in ('package_name', 'webhook_rebuild')):
+                continue
+            action = 'edit' if current else 'add'
+            self.request(f'package/{action}/{OWNER}/{self.project}/{name}/scm', desired)
+
     def resolve(self, output, submit=False, timeout=5400):
+        if submit:
+            self.configure_sources()
         revision = subprocess.check_output(['git', '-C', ROOT, 'rev-parse', 'HEAD'], text=True).strip()
         identities = {package: package_identity(package) for package in PACKAGES}
         key = ROOT / 'keys' / f'{self.project}.asc'
