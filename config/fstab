@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+# Pichi supplies one writable disk alongside the read-only image.
+/dev/pichi-storage /var ext4 defaults,x-systemd.makefs,x-systemd.growfs 0 2
