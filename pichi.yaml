@@ -61,12 +61,16 @@ stages:
       - copy: { from: corium, path: /corium, into: /tmp/corium }
       - exec:
           command: >-
+            kernel_cmdline=bootconfig;
+            if [ "$(uname -m)" = x86_64 ]; then
+              kernel_cmdline="$kernel_cmdline pci=lastbus=0";
+            fi;
             /tmp/arma build --kernel /usr/lib/modules/*/vmlinuz
             --config /usr/lib/modules/*/config --initrd /tmp/corium
             --module virtio_pci --module virtio_blk --module virtio_console
             --module dm_mod --module dm_zero --module dm_snapshot
             --module dm_verity --module ext4
-            --cmdline bootconfig --dtb attached /boot.pmi
+            --cmdline "$kernel_cmdline" --dtb attached /boot.pmi
 
 image:
   root: rootfs
