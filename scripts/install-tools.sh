@@ -12,7 +12,9 @@ python3 scripts/copr.py download --lock "$directory/packages.lock.json" \
 project=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["project"])' \
     "$directory/packages.lock.json")
 rpmkeys --import "keys/$project.asc"
-dnf -y --setopt=install_weak_deps=False --setopt=localpkg_gpgcheck=True \
+# Fedora container images default to nodocs; provenance is an RPM doc file.
+dnf -y --setopt=tsflags= --setopt=install_weak_deps=False \
+    --setopt=localpkg_gpgcheck=True \
     install "$directory"/*."$(uname -m)".rpm
 python3 - "$directory/packages.lock.json" <<'PYCODE'
 import json, pathlib, sys
