@@ -16,7 +16,7 @@ With a published Fedora tool image available:
 git submodule update --init --recursive
 pichi pull ghcr.io/pichi-vm/fedora:43
 pichi build . --ref HEAD --memory 8192 \
-  --build-image ghcr.io/pichi-vm/conglobate@sha256:262f87ecd7a178a90979eebd9689a0a28c1a4d844e6572a0fea116bf782a0b6f \
+  --build-image ghcr.io/pichi-vm/conglobate@sha256:2239264c3281d53beedabdbfe8b3c587ac8ff8f2e87d4642e192f943f6cd5c45 \
   -t ghcr.io/pichi-vm/fedora:43
 ```
 
@@ -44,7 +44,8 @@ On both native amd64 and arm64 KVM runners, CI builds the first image, uses it
 for an ordinary locked successor, and rebuilds the bootstrap recipe under its
 input name. It checks the output manifest annotations and retains image
 metadata and the successor's committed source in a Git bundle. The jobs
-exercise image production and reuse; they do not test the output's login boot.
+exercise image production and reuse, validate qualified roots, and boot the
+first output through its serial login prompt.
 Only main publishes the combined multi-architecture index; PRs publish nothing.
 
 ## Trademark

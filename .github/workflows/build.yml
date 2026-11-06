@@ -13,7 +13,7 @@ defaults:
 env:
   RELEASE: "43"
   NIGHTLY: "nightly-2026-07-06"
-  BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:262f87ecd7a178a90979eebd9689a0a28c1a4d844e6572a0fea116bf782a0b6f"
+  BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:2239264c3281d53beedabdbfe8b3c587ac8ff8f2e87d4642e192f943f6cd5c45"
 
 jobs:
   # Validate alongside builds; publication requires both to succeed.
@@ -163,6 +163,23 @@ jobs:
           test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
             '{{ "dev.pichi.build.lock" in manifest.annotations }}')" = false
 
+          # Pichi owns root validation and conversion to the boot interface.
+          # Verify the active producer emits the qualified shared contract.
+          for image in qualification.local/fedora:f1 qualification.local/fedora:f2 ghcr.io/pichi-vm/fedora:43; do
+            root=$(pichi inspect "$image" --format '{{ manifest.annotations["dev.pichi.carapace.verity.hash"] }}')
+            [[ "$root" =~ ^sha256:[0-9a-f]{64}$ ]]
+            test "$(pichi inspect "$image" --format '{{ "dev.pichi.carapace.verity.algo" in manifest.annotations }}')" = false
+          done
+
+      - name: Boot the qualified-root Fedora image
+        run: |
+          status=0
+          timeout --signal=INT --kill-after=10s 120s \
+            pichi run qualification.local/fedora:f1 --memory 2048 \
+            > .build/f1.boot.log 2>&1 || status=$?
+          test "$status" = 124
+          grep -a ' login:' .build/f1.boot.log
+
       - name: Upload build evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -170,6 +187,7 @@ jobs:
           name: selfhost-evidence-${{ matrix.arch }}
           path: |
             .build/*.json
+            .build/*.boot.log
             .build/successor.bundle
           include-hidden-files: true
 
