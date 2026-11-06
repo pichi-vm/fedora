@@ -76,6 +76,8 @@ image:
       corium.root: ""
       kernel.ro: [ ]
       kernel.console: hvc0
+      # FIPS mode retains the kernel's crypto self-tests.
+      kernel.cryptomgr.notests: "1"
       kernel.SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST: "40"
       kernel.systemd.volatile: state
       kernel.systemd.unit: multi-user.target
