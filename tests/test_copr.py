@@ -17,7 +17,7 @@ import copr
 class Selection(unittest.TestCase):
     def test_pending_srpm_is_reused_after_an_image_only_commit(self):
         client = copr.Copr('pichi-staging')
-        build = {'id': 4, 'state': 'running', 'source_package': None,
+        build = {'id': 4, 'state': 'importing', 'source_package': None,
                  'chroots': ['fedora-43-x86_64', 'fedora-43-aarch64']}
         source = {'source_dict': {'committish': 'b' * 40, 'subdirectory': 'packaging/arma',
                                  'clone_url': 'https://github.com/pichi-vm/fedora.git'}}

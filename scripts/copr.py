@@ -22,7 +22,7 @@ API = 'https://copr.fedorainfracloud.org/api_3/'
 OWNER = 'npmccallum'
 PACKAGES = ('corium', 'arma', 'dillo', 'pichi')
 ARCHES = ('x86_64', 'aarch64')
-FAILED = {'failed', 'canceled', 'skipped', 'forked', 'importing'}
+FAILED = {'failed', 'canceled', 'skipped', 'forked'}
 
 
 class Copr:
