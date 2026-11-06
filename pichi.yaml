@@ -82,5 +82,6 @@ image:
       kernel.systemd.show_status: "false"
 
 requirements:
+  slot: pci
   cpus: { recommended: 2 }
   memory: { required: 1024, recommended: 2048 }
