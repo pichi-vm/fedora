@@ -62,19 +62,34 @@ class Copr:
             builds = self.request('build/list?' + query)['items']
             for build in builds:
                 version = (build.get('source_package') or {}).get('version') or ''
-                if build['state'] == 'succeeded' and version.endswith('.g' + identity[:16]):
+                if build['state'] not in FAILED and version.endswith('.g' + identity[:16]):
                     if all(f'fedora-43-{arch}' in build['chroots'] for arch in ARCHES):
                         return build['id']
                 elif build['state'] not in FAILED | {'succeeded'}:
                     source = self.request(f"build/source-build-config/{build['id']}")['source_dict']
-                    if (source.get('committish') == revision
-                            and source.get('subdirectory') == f'packaging/{package}'
+                    if (source.get('subdirectory') == f'packaging/{package}'
                             and source.get('clone_url', '').removesuffix('.git')
-                            == 'https://github.com/pichi-vm/fedora'):
-                        return build['id']
+                            == 'https://github.com/pichi-vm/fedora'
+                            and all(f'fedora-43-{arch}' in build['chroots'] for arch in ARCHES)):
+                        commit = source.get('committish', '')
+                        if commit == revision or self.input_at(package, commit) == identity:
+                            return build['id']
             if len(builds) < 100:
                 return None
             offset += len(builds)
+
+    @staticmethod
+    def input_at(package, commit):
+        # A PR merge commit or image-only update may share all package inputs
+        # with a source build already running. Inspect local fetched history;
+        # never resolve a moving branch name as an immutable build identity.
+        if not re.fullmatch('[0-9a-f]{40}', commit):
+            return None
+        result = subprocess.run([
+            'git', '-C', ROOT, 'ls-tree', '-rz', commit, '--', '.copr',
+            'scripts/srpm.py', '.gitmodules', f'packaging/{package}', f'sources/{package}'],
+            capture_output=True)
+        return hashlib.sha256(result.stdout).hexdigest() if result.returncode == 0 else None
 
     def submit(self, package, revision):
         return self.request('build/create/scm', {
