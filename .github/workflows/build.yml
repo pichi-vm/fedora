@@ -12,7 +12,6 @@ defaults:
 
 env:
   RELEASE: "43"
-  NIGHTLY: "nightly-2026-07-06"
   BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:dda6d25f6f51ad171611f159f4202bdec4e50482d6e741ad566c1b4d7c61d946"
 
 jobs:
@@ -23,7 +22,7 @@ jobs:
     permissions:
       contents: read
 
-  # Prepare native seeds on Ubuntu; the ARM KVM runner uses NixOS.
+  # Prepare native seeds on Ubuntu using published PPA tools.
   tool-image:
     strategy:
       fail-fast: false
@@ -39,21 +38,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          submodules: recursive
+          persist-credentials: false
 
-      - name: Install toolchain
-        run: rustup toolchain install "$NIGHTLY" --profile minimal
-
-      - uses: Swatinem/rust-cache@v2
-        env:
-          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
-        with:
-          workspaces: sources/pichi -> target
-
-      - name: Build Pichi
+      - name: Install Pichi
         run: |
-          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
+          sudo add-apt-repository --yes ppa:nmccallum/pichi
+          sudo apt-get update
+          sudo apt-get install -y pichi
           echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
 
       - name: Obtain the Fedora tool image
@@ -92,7 +83,7 @@ jobs:
           - arch: amd64
             runner: ubuntu-24.04
           - arch: arm64
-            runner: [ self-hosted, Linux, ARM64, bare-metal, aarch64, kvm ]
+            runner: avrea-ubuntu-latest-arm-4-vcpu
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -100,39 +91,21 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
-          submodules: recursive
+          persist-credentials: false
 
       - name: Reserve build VM memory
         run: |
-          if [ "${{ matrix.arch }}" = amd64 ]; then
-            sudo chmod a+rw /dev/kvm
-            sudo sysctl -w vm.nr_hugepages=4096
-          fi
+          sudo chmod a+rw /dev/kvm
+          sudo sysctl -w vm.nr_hugepages=4096
           test -r /dev/kvm && test -w /dev/kvm
           test "$(cat /proc/sys/vm/nr_hugepages)" -ge 4096
 
-      - name: Install toolchain
-        run: rustup toolchain install "$NIGHTLY" --profile minimal
-
-      - uses: Swatinem/rust-cache@v2
-        env:
-          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
-        with:
-          workspaces: |
-            sources/pichi -> target
-            sources/dillo -> target
-          cache-targets: false
-          cache-directories: |
-            ${{ github.workspace }}/sources/pichi/target
-            ${{ github.workspace }}/sources/dillo/target
-          save-if: ${{ runner.environment == 'github-hosted' || github.ref == 'refs/heads/main' }}
-
-      - name: Build Pichi and Dillo
+      - name: Install Pichi and Dillo
         run: |
-          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          echo "$GITHUB_WORKSPACE/sources/pichi/target/release" >> "$GITHUB_PATH"
-          (cd sources/dillo && cargo "+$NIGHTLY" --config packaging/cargo-config.toml build --locked --release --bin dillo)
-          echo "PICHI_DILLO=$GITHUB_WORKSPACE/sources/dillo/target/release/dillo" >> "$GITHUB_ENV"
+          sudo add-apt-repository --yes ppa:nmccallum/pichi
+          sudo apt-get update
+          sudo apt-get install -y pichi dillo-vm
+          echo "PICHI_DILLO=/usr/bin/dillo" >> "$GITHUB_ENV"
           echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
 
       - name: Download native tool image
@@ -218,21 +191,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
         with:
-          submodules: recursive
+          persist-credentials: false
 
-      - name: Install toolchain
-        run: rustup toolchain install "$NIGHTLY" --profile minimal
-
-      - uses: Swatinem/rust-cache@v2
-        env:
-          RUSTUP_TOOLCHAIN: ${{ env.NIGHTLY }}
-        with:
-          workspaces: sources/pichi -> target
-
-      - name: Install pichi
+      - name: Install Pichi
         run: |
-          (cd sources/pichi && cargo "+$NIGHTLY" build --locked --release --bin pichi)
-          sudo install -m755 sources/pichi/target/release/pichi /usr/local/bin/pichi
+          sudo add-apt-repository --yes ppa:nmccallum/pichi
+          sudo apt-get update
+          sudo apt-get install -y pichi
 
       - name: Download OCI layout artifacts
         uses: actions/download-artifact@v4

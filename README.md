@@ -6,30 +6,33 @@ requirements for booting Fedora with `pichi run`.
 
 ## Build
 
-Use a native Linux/KVM host, Pichi and Dillo from their
-[sources/pichi](sources/pichi) and [sources/dillo](sources/dillo) submodules, and
+Use a native Linux/KVM host with the `pichi` and `dillo-vm` packages from
+[COPR](https://copr.fedorainfracloud.org/coprs/npmccallum/pichi/) or
+[the Ubuntu PPA](https://launchpad.net/~nmccallum/+archive/ubuntu/pichi), and
 4096 available 2 MiB hugepages for the 8 GiB build VM. Set `PICHI_DILLO` if
 Dillo is not beside Pichi.
 With a published Fedora tool image available:
 
 ```sh
-git submodule update --init --recursive
 pichi pull ghcr.io/pichi-vm/fedora:43
 pichi build . --ref HEAD --memory 8192 \
   --build-image ghcr.io/pichi-vm/conglobate@sha256:dda6d25f6f51ad171611f159f4202bdec4e50482d6e741ad566c1b4d7c61d946 \
   -t ghcr.io/pichi-vm/fedora:43
 ```
 
-The build uses committed sources, including the Arma and Corium submodule
-pins. The stages install the root filesystem, extend it with Fedora's Rust
-toolchain, compile Arma and Corium separately, and assemble the boot payload.
+The build uses the committed image recipe. It installs the root filesystem
+from Fedora packages and assembles the boot payload with `arma` and `corium`
+from COPR. Only the firmware stage installs these tools; the final root
+filesystem remains the Fedora base system. This repo contains no package
+specs, source submodules, or source compilation steps.
 Arma selects the required kernel modules and constructs the initramfs. The
 package-install stages mount `/run`, `/tmp` and `/var` as tmpfs so their
 transient state is not included in the image.
 
 ## Bootstrap and CI
 
-CI first tries to pull the published Fedora image. If unavailable, inline
+CI installs its host tools from the PPA on Ubuntu amd64 and arm64 runners,
+then tries to pull the published Fedora image. If unavailable, inline
 workflow steps use Ubuntu's DNF to install only enough Fedora packages to run
 DNF, create a bare ext4 image with `mkfs.ext4 -d`, and import it under the same
 `ghcr.io/pichi-vm/fedora:43` name. This initial tool image is never published.
