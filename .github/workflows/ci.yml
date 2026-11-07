@@ -15,10 +15,125 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+env:
+  RELEASE: "43"
+  BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:a6c123d3b63d02282b89cb8c233e3c816f3c7644695d84d8e614096721405c6f"
+
 jobs:
+  commit-messages:
+    name: Commit messages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: 🔎 Check commit messages
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            commits="$PR_BASE..$PR_HEAD"
+          elif [ "$GITHUB_EVENT_NAME" = push ] && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            commits="$PUSH_BEFORE..$GITHUB_SHA"
+          else
+            commits="$GITHUB_SHA^!"
+          fi
+          pipx run gitlint --commits "$commits"
+
   build:
-    name: build
-    uses: ./.github/workflows/build.yml
+    name: Build (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: avrea-ubuntu-latest-arm-4-vcpu
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: ⚙️ Prepare build host
+        run: |
+          sudo chmod a+rw /dev/kvm
+          sudo sysctl -w vm.nr_hugepages=4096
+          test -r /dev/kvm && test -w /dev/kvm
+          test "$(cat /proc/sys/vm/nr_hugepages)" -ge 4096
+
+      - name: 📦 Install Pichi
+        run: |
+          sudo add-apt-repository --yes ppa:nmccallum/pichi
+          sudo apt-get install -y pichi
+
+      - name: 🔨 Build and save Fedora
+        env:
+          XDG_DATA_HOME: ${{ runner.temp }}/fedora-image-cache
+        run: |
+          pichi pull "ghcr.io/pichi-vm/fedora:$RELEASE"
+          pichi build . --ref HEAD --build-image "$BUILD_IMAGE" --memory 8192 \
+            -t "ghcr.io/pichi-vm/fedora:$RELEASE"
+
+          pichi save "ghcr.io/pichi-vm/fedora:$RELEASE" -o "oci-${{ matrix.arch }}"
+
+      - name: ⬆️ Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: oci-${{ matrix.arch }}
+          path: oci-${{ matrix.arch }}
+
+  publish:
+    name: Publish
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: [commit-messages, build]
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
+    steps:
+      - name: 📦 Install Pichi
+        run: |
+          sudo add-apt-repository --yes ppa:nmccallum/pichi
+          sudo apt-get install -y pichi
+
+      - name: ⬇️ Download images
+        uses: actions/download-artifact@v4
+        with:
+          pattern: oci-*
+
+      - name: 🔑 Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$HOME/.docker"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}' \
+            "$(printf '%s:%s' "$GITHUB_ACTOR" "$GHCR_TOKEN" | base64 -w0)" \
+            > "$HOME/.docker/config.json"
+
+      - name: 🚀 Publish image
+        run: |
+          pichi load "oci-amd64" --tag "fedora:${RELEASE}-amd64"
+          pichi load "oci-arm64" --tag "fedora:${RELEASE}-arm64"
+          list="fedora:${RELEASE}"
+          pichi manifest create "$list" "${list}-amd64" "${list}-arm64" \
+            -a "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            -a "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -a "org.opencontainers.image.version=${RELEASE}" \
+            -a "org.opencontainers.image.title=Fedora ${RELEASE}" \
+            -a "org.opencontainers.image.description=Fedora ${RELEASE} base OS carapace for pichi"
+          # Pichi requires explicit VM platform annotations on both entries.
+          pichi manifest annotate "$list" "${list}-amd64" --os pichi --arch amd64
+          pichi manifest annotate "$list" "${list}-arm64" --os pichi --arch arm64
+          pichi manifest push "$list" "ghcr.io/pichi-vm/fedora:$RELEASE"
