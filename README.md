@@ -10,8 +10,7 @@ Use a native Linux/KVM host with the `pichi` package (which depends on
 `dillo-vm`) from
 [COPR](https://copr.fedorainfracloud.org/coprs/npmccallum/pichi/) or
 [the Ubuntu PPA](https://launchpad.net/~nmccallum/+archive/ubuntu/pichi), and
-4096 available 2 MiB hugepages for the 8 GiB build VM. Pichi finds Dillo
-beside itself or on `PATH`; `PICHI_DILLO` overrides discovery.
+4096 available 2 MiB hugepages for the 8 GiB build VM. Put Dillo on `PATH` so Pichi can find it.
 With a published Fedora tool image available:
 
 ```sh
