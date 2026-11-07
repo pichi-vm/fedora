@@ -5,9 +5,10 @@
 Commits follow Conventional Commits and standard git formatting, enforced by
 gitlint (see `.gitlint`) in CI.
 
-- Subject: `type(scope): summary` — lowercase, imperative, no trailing period,
-  at most 50 characters. Types: `feat`, `fix`, `docs`, `style`, `refactor`,
-  `perf`, `test`, `build`, `ci`, `chore`, `revert`, `spec`.
+- Subject: `type(scope): summary` (scope optional) — lowercase, imperative,
+  no trailing period, at most 50 characters. Imperative wording is checked
+  in review. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`,
+  `test`, `build`, `ci`, `chore`, `revert`, `spec`.
 - One blank line, then a body wrapped at 72 characters explaining what changed
   and why (not how — the diff shows how).
 - Write each message to stand on its own: describe the change and its rationale

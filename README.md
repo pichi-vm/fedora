@@ -6,11 +6,12 @@ requirements for booting Fedora with `pichi run`.
 
 ## Build
 
-Use a native Linux/KVM host with the `pichi` and `dillo-vm` packages from
+Use a native Linux/KVM host with the `pichi` package (which depends on
+`dillo-vm`) from
 [COPR](https://copr.fedorainfracloud.org/coprs/npmccallum/pichi/) or
 [the Ubuntu PPA](https://launchpad.net/~nmccallum/+archive/ubuntu/pichi), and
-4096 available 2 MiB hugepages for the 8 GiB build VM. Set `PICHI_DILLO` if
-Dillo is not beside Pichi.
+4096 available 2 MiB hugepages for the 8 GiB build VM. Pichi finds Dillo
+beside itself or on `PATH`; `PICHI_DILLO` overrides discovery.
 With a published Fedora tool image available:
 
 ```sh
@@ -65,11 +66,13 @@ pichi manifest push fedora:43 ghcr.io/pichi-vm/fedora:43
 
 ## CI
 
-CI installs Pichi and Dillo from the PPA, pulls the existing Fedora image,
-and builds the new image **once per architecture**. It has no bootstrap
+CI checks Conventional Commit messages, installs Pichi from the PPA,
+pulls the existing Fedora image, and builds the new image **once per
+architecture**. It has no bootstrap
 fallback: if the registry has no prior image, perform the local procedure
-above first. Only main publishes the combined multi-architecture index;
-PRs build without publishing.
+above first. Both builds transfer their images as workflow artifacts.
+Only main publishes the combined multi-architecture index after commit checking
+and both builds succeed; PRs build without publishing.
 
 The recipe marks its tool input `!bootstrap`, so it needs no `pichi.lock`.
 The output manifest has `dev.pichi.build.bootstrapped=true`, identifying the
