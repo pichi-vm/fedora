@@ -29,26 +29,52 @@ Arma selects the required kernel modules and constructs the initramfs. The
 package-install stages mount `/run`, `/tmp` and `/var` as tmpfs so their
 transient state is not included in the image.
 
-## Bootstrap and CI
+## Initial bootstrap
 
-CI installs its host tools from the PPA on Ubuntu amd64 and arm64 runners,
-then tries to pull the published Fedora image. If unavailable, inline
-workflow steps use Ubuntu's DNF to install only enough Fedora packages to run
-DNF, create a bare ext4 image with `mkfs.ext4 -d`, and import it under the same
-`ghcr.io/pichi-vm/fedora:43` name. This initial tool image is never published.
-Both paths then run the same `pichi build` recipe.
+Only if the registry has no prior Fedora image, prepare a minimal tool image
+locally on each target architecture. This requires DNF, RPM, e2fsprogs, and
+Pichi. The temporary root contains only enough Fedora userspace to run DNF;
+it is not the production image and is not published.
 
-The recipe marks that tool input `!bootstrap`, so it needs no `pichi.lock`.
+```sh
+bootstrap_dir=$(mktemp -d)
+sudo dnf -y --installroot="$bootstrap_dir/root" --releasever=43 \
+  --repofrompath=fedora,https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/$(uname -m)/os/ \
+  --repo=fedora --setopt=fedora.gpgkey=https://fedoraproject.org/fedora.gpg \
+  --setopt=gpgcheck=1 --setopt=install_weak_deps=False install \
+  filesystem bash coreutils dnf glibc-minimal-langpack ca-certificates
+sudo dnf --installroot="$bootstrap_dir/root" --releasever=43 clean all
+sudo mkfs.ext4 -F -d "$bootstrap_dir/root" "$bootstrap_dir/bootstrap.raw" 1G
+pichi import raw "$bootstrap_dir/bootstrap.raw" -t ghcr.io/pichi-vm/fedora:43
+```
+
+Then run the same `pichi build` command from the Build section, using this
+cached input instead of pulling it. Build once on each native architecture
+and export each result with `pichi save ghcr.io/pichi-vm/fedora:43 -o oci-amd64`
+or `-o oci-arm64`. Copy both layouts to the publishing host. With GHCR write
+authentication configured:
+
+```sh
+pichi load oci-amd64 --tag fedora:43-amd64
+pichi load oci-arm64 --tag fedora:43-arm64
+pichi manifest create fedora:43 fedora:43-amd64 fedora:43-arm64
+pichi manifest annotate fedora:43 fedora:43-amd64 --os pichi --arch amd64
+pichi manifest annotate fedora:43 fedora:43-arm64 --os pichi --arch arm64
+pichi manifest push fedora:43 ghcr.io/pichi-vm/fedora:43
+```
+
+## CI
+
+CI installs Pichi and Dillo from the PPA, pulls the existing Fedora image,
+and builds the new image **once per architecture**. It has no bootstrap
+fallback: if the registry has no prior image, perform the local procedure
+above first. Only main publishes the combined multi-architecture index;
+PRs build without publishing.
+
+The recipe marks its tool input `!bootstrap`, so it needs no `pichi.lock`.
 The output manifest has `dev.pichi.build.bootstrapped=true`, identifying the
 unlocked input boundary. Pichi resolves the cached input before replacing its
 tag, so the produced image can serve as the next build's tool image.
-
-On both native amd64 and arm64 KVM runners, CI builds the first image, uses it
-for an ordinary locked successor, and rebuilds the bootstrap recipe under its
-input name. It checks the output manifest annotations and retains image
-metadata and the successor's committed source in a Git bundle. The jobs
-exercise image production and reuse; they do not test the output's login boot.
-Only main publishes the combined multi-architecture index; PRs publish nothing.
 
 ## Trademark
 

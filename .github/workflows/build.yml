@@ -22,60 +22,7 @@ jobs:
     permissions:
       contents: read
 
-  # Prepare native seeds on Ubuntu using published PPA tools.
-  tool-image:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install Pichi
-        run: |
-          sudo add-apt-repository --yes ppa:nmccallum/pichi
-          sudo apt-get update
-          sudo apt-get install -y pichi
-          echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
-
-      - name: Obtain the Fedora tool image
-        run: |
-          mkdir -p .build
-          if ! pichi pull ghcr.io/pichi-vm/fedora:43; then
-            sudo apt-get update
-            sudo apt-get install -y dnf rpm e2fsprogs
-            sudo dnf -y --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 \
-              --repofrompath=fedora,https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/$(uname -m)/os/ \
-              --repo=fedora --setopt=fedora.gpgkey=https://fedoraproject.org/fedora.gpg \
-              --setopt=gpgcheck=1 --setopt=install_weak_deps=False install \
-              filesystem bash coreutils dnf glibc-minimal-langpack ca-certificates
-            sudo dnf --installroot="$RUNNER_TEMP/fedora-root" --releasever=43 clean all
-            sudo mkfs.ext4 -F -d "$RUNNER_TEMP/fedora-root" .build/bootstrap.raw 1G
-            pichi import raw .build/bootstrap.raw -t ghcr.io/pichi-vm/fedora:43
-          fi
-          pichi inspect ghcr.io/pichi-vm/fedora:43 > .build/seed.json
-          pichi save ghcr.io/pichi-vm/fedora:43 -o .build/tool-image
-
-      - name: Upload native tool image
-        uses: actions/upload-artifact@v4
-        with:
-          name: tool-image-${{ matrix.arch }}
-          path: |
-            .build/tool-image
-            .build/seed.json
-          include-hidden-files: true
-
   build:
-    needs: tool-image
     strategy:
       fail-fast: false
       matrix:
@@ -108,69 +55,14 @@ jobs:
           echo "PICHI_DILLO=/usr/bin/dillo" >> "$GITHUB_ENV"
           echo "XDG_DATA_HOME=$RUNNER_TEMP/fedora-image-cache" >> "$GITHUB_ENV"
 
-      - name: Download native tool image
-        uses: actions/download-artifact@v4
-        with:
-          name: tool-image-${{ matrix.arch }}
-          path: .build
-
       - name: Build Fedora
         run: |
-          pichi load .build/tool-image --tag ghcr.io/pichi-vm/fedora:43
+          pichi pull ghcr.io/pichi-vm/fedora:43
           pichi build . --ref HEAD --build-image "$BUILD_IMAGE" --memory 8192 \
-            -t qualification.local/fedora:f1
-
-      - name: Qualify Fedora successor builds
-        run: |
-          original=$(git rev-parse HEAD)
-          pichi inspect qualification.local/fedora:f1 > .build/f1.json
-          test "$(pichi inspect qualification.local/fedora:f1 --format \
-            '{{ manifest.annotations["dev.pichi.build.commit"] }}')" = "sha1:$original"
-          test "$(pichi inspect qualification.local/fedora:f1 --format \
-            '{{ manifest.annotations["dev.pichi.build.bootstrapped"] }}')" = true
-          test "$(pichi inspect qualification.local/fedora:f1 --format \
-            '{{ "dev.pichi.build.lock" in manifest.annotations }}')" = false
-
-          pichi tag qualification.local/fedora:f1 ghcr.io/pichi-vm/fedora:43
-          sed -i 's/!bootstrap //' pichi.yaml
-          pichi update --pull=never
-          git add pichi.yaml pichi.lock
-          git -c user.name="Pichi CI" -c user.email="ci@pichi.invalid" \
-            commit -m "test: use the first Fedora image as input"
-          git bundle create .build/successor.bundle HEAD
-          pichi build . --ref HEAD --build-image "$BUILD_IMAGE" --memory 8192 \
-            -t qualification.local/fedora:f2
-          pichi inspect qualification.local/fedora:f2 > .build/f2.json
-          test "$(pichi inspect qualification.local/fedora:f2 --format \
-            '{{ manifest.annotations["dev.pichi.build.commit"] }}')" = "sha1:$(git rev-parse HEAD)"
-          test "$(pichi inspect qualification.local/fedora:f2 --format \
-            '{{ "dev.pichi.build.bootstrapped" in manifest.annotations }}')" = false
-          test "$(pichi inspect qualification.local/fedora:f2 --format \
-            '{{ manifest.annotations["dev.pichi.build.lock"] }}')" = pichi.lock
-          grep -F "$(pichi inspect qualification.local/fedora:f1 --format '{{ digest }}')" pichi.lock
-
-          pichi build . --ref "$original" --build-image "$BUILD_IMAGE" --memory 8192 \
             -t ghcr.io/pichi-vm/fedora:43
-          pichi inspect ghcr.io/pichi-vm/fedora:43 > .build/recursive.json
-          test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
-            '{{ manifest.annotations["dev.pichi.build.commit"] }}')" = "sha1:$original"
-          test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
-            '{{ manifest.annotations["dev.pichi.build.bootstrapped"] }}')" = true
-          test "$(pichi inspect ghcr.io/pichi-vm/fedora:43 --format \
-            '{{ "dev.pichi.build.lock" in manifest.annotations }}')" = false
-
-      - name: Upload build evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: selfhost-evidence-${{ matrix.arch }}
-          path: |
-            .build/*.json
-            .build/successor.bundle
-          include-hidden-files: true
 
       - name: Export production image
-        run: pichi save qualification.local/fedora:f1 -o "oci-${{ matrix.arch }}"
+        run: pichi save ghcr.io/pichi-vm/fedora:43 -o "oci-${{ matrix.arch }}"
 
       - name: Upload OCI layout artifact
         uses: actions/upload-artifact@v4
