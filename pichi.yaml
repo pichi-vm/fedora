@@ -16,8 +16,10 @@ stages:
             dnf -y --installroot=/mnt --use-host-config --releasever=43 \
               --setopt=install_weak_deps=False install \
               filesystem systemd systemd-udev kernel-core kernel-modules \
-              bash coreutils dnf glibc-minimal-langpack ca-certificates
+              bash coreutils dnf glibc-minimal-langpack ca-certificates e2fsprogs
           network: true
+      - copy: { path: config/fstab, into: /mnt/etc/fstab }
+      - copy: { path: config/60-pichi-storage.rules, into: /mnt/usr/lib/udev/rules.d/60-pichi-storage.rules }
   tools:
     extend: rootfs
     mounts:
@@ -77,7 +79,6 @@ image:
       kernel.ro: [ ]
       kernel.console: hvc0
       kernel.SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST: "40"
-      kernel.systemd.volatile: state
       kernel.systemd.unit: multi-user.target
       kernel.systemd.show_status: "false"
 
@@ -85,3 +86,4 @@ requirements:
   slot: pci
   cpus: { recommended: 2 }
   memory: { required: 1024, recommended: 2048 }
+  storage: { required: 1024 }

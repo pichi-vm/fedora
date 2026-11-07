@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+# The image GPT is read-only; Pichi supplies exactly one writable block device.
+SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="vd*", ATTR{ro}=="0", SYMLINK+="pichi-storage"
