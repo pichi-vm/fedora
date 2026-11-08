@@ -7,6 +7,7 @@ stages:
   rootfs:
     use: !bootstrap ghcr.io/pichi-vm/fedora:43
     steps:
+      - copy: { path: files, into: /mnt }
       - exec:
           command: |
             dnf -y --installroot=/mnt --use-host-config --releasever=43 \
