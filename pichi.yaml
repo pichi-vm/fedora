@@ -29,7 +29,7 @@ stages:
           command: >-
             arma build --kernel /usr/lib/modules/*/vmlinuz
             --config /usr/lib/modules/*/config --initrd /usr/bin/corium
-            --module virtio_mmio --module virtio_blk --module virtio_console
+            --mmio-slots 16 --module virtio_mmio --module virtio_blk --module virtio_console
             --module dm_mod --module dm_zero --module dm_snapshot
             --module dm_verity --module ext4
             --cmdline "bootconfig loglevel=5" --dtb attached /boot.pmi
