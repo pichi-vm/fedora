@@ -122,6 +122,18 @@ jobs:
 
           pichi save "ghcr.io/pichi-vm/fedora:$RELEASE" -o "oci-${{ matrix.arch }}"
 
+          pichi inspect ghcr.io/pichi-vm/pichi-build:latest
+          pichi inspect "ghcr.io/pichi-vm/fedora:$RELEASE" | tee cold-image.json |
+            jq -e '.manifest.annotations["dev.pichi.build.bootstrapped"] == "true"'
+          cat cold-image.json
+          status=0
+          timeout --signal=INT --kill-after=10s 60s \
+            pichi run "ghcr.io/pichi-vm/fedora:$RELEASE" > cold-boot.log 2>&1 || status=$?
+          cat cold-boot.log
+          pichi stop --time 0 "$(head -n 1 cold-boot.log)"
+          test "$status" -eq 124
+          grep -q ' login:' cold-boot.log
+
       - name: ⬆️ Upload image
         uses: actions/upload-artifact@v4
         with:
