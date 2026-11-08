@@ -81,7 +81,7 @@ jobs:
         env:
           XDG_DATA_HOME: ${{ runner.temp }}/fedora-image-cache
         run: |
-          if ! pichi pull "ghcr.io/pichi-vm/fedora:$RELEASE"; then
+          if ! pichi pull "ghcr.io/pichi-vm/fedora:bootstrap-qualification-20261108"; then
             sudo apt-get install -y dnf rpm e2fsprogs
             bootstrap=$(mktemp -d "$RUNNER_TEMP/bootstrap.XXXXXX")
             trap 'sudo rm -rf "$bootstrap"' EXIT
