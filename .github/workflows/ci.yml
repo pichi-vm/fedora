@@ -89,7 +89,7 @@ jobs:
           for ((page=1; ; page++)); do
             if versions=$(curl --fail-with-body --silent --show-error \
               -H 'Authorization: Bearer ${{ github.token }}' \
-              "https://api.github.com/orgs/pichi-vm/packages/container/fedora/versions?per_page=100&page=$page"); then
+              "https://api.github.com/orgs/pichi-vm/packages/container/never-published-bootstrap-probe-20261108/versions?per_page=100&page=$page"); then
               digest=$(jq -r --arg tag "$RELEASE" \
                 '.[] | select(.metadata.container.tags | index($tag)) | .name' <<< "$versions")
               if [ -n "$digest" ] || [ "$(jq length <<< "$versions")" -lt 100 ]; then break; fi
