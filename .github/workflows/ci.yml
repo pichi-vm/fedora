@@ -88,7 +88,7 @@ jobs:
         run: |
           image=ghcr.io/pichi-vm/fedora
           digest=
-          if versions=$(gh api --paginate 'orgs/pichi-vm/packages/container/fedora/versions?per_page=100'); then
+          if versions=$(gh api --paginate 'orgs/pichi-vm/packages/container/never-published-bootstrap-probe-20261108/versions?per_page=100'); then
             digest=$(jq -r --arg tag "$RELEASE" \
               '.[] | select(.metadata.container.tags | index($tag)) | .name' <<< "$versions")
           else
