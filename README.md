@@ -17,7 +17,7 @@ With a published Fedora tool image available:
 ```sh
 pichi pull ghcr.io/pichi-vm/fedora:43
 pichi build . --ref HEAD --memory 8192 \
-  --build-image ghcr.io/pichi-vm/conglobate@sha256:a6c123d3b63d02282b89cb8c233e3c816f3c7644695d84d8e614096721405c6f \
+  --build-image ghcr.io/pichi-vm/conglobate@sha256:8138d258113a161c831e7bad8a2d1fbf7abc9357b4d10637305c9d811a5f3237 \
   -t ghcr.io/pichi-vm/fedora:43
 ```
 
