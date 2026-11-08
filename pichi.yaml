@@ -12,7 +12,7 @@ stages:
             dnf -y --installroot=/mnt --use-host-config --releasever=43 \
               --setopt=install_weak_deps=False install \
               filesystem systemd systemd-udev kernel-core kernel-modules \
-              bash coreutils dnf glibc-minimal-langpack ca-certificates libbpf
+              bash coreutils dnf glibc-minimal-langpack ca-certificates libbpf e2fsprogs
             install -m0444 /dev/null /mnt/etc/machine-id
             rm -f /mnt/var/lib/dbus/machine-id
           network: true
@@ -43,7 +43,6 @@ image:
       kernel.ro: [ ]
       kernel.console: [tty0, hvc0]
       kernel.SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST: "40"
-      kernel.systemd.volatile: state
       kernel.systemd.unit: multi-user.target
       kernel.systemd.show_status: "false"
 
