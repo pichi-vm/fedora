@@ -29,49 +29,17 @@ Arma selects the required kernel modules and constructs the initramfs. The
 package-install stages mount `/run`, `/tmp` and `/var` as tmpfs so their
 transient state is not included in the image.
 
-## Initial bootstrap
+## CI and bootstrap
 
-Only if the registry has no prior Fedora image, prepare a minimal tool image
-locally on each target architecture. This requires DNF, RPM, e2fsprogs, and
-Pichi. The temporary root contains only enough Fedora userspace to run DNF;
-it is not the production image and is not published.
+[CI](.github/workflows/ci.yml) checks commit messages and builds the new image
+**once per native architecture**. It pulls the published Fedora image. If the
+pull fails, CI creates a minimal Fedora root containing DNF and its dependencies,
+imports it into Pichi's local cache under the same image name, and runs the
+production recipe. The temporary tool image is never published.
 
-```sh
-bootstrap_dir=$(mktemp -d)
-sudo dnf -y --installroot="$bootstrap_dir/root" --releasever=43 \
-  --repofrompath=fedora,https://dl.fedoraproject.org/pub/fedora/linux/releases/43/Everything/$(uname -m)/os/ \
-  --repo=fedora --setopt=fedora.gpgkey=https://fedoraproject.org/fedora.gpg \
-  --setopt=gpgcheck=1 --setopt=install_weak_deps=False install \
-  filesystem bash coreutils dnf glibc-minimal-langpack ca-certificates
-sudo dnf --installroot="$bootstrap_dir/root" --releasever=43 clean all
-sudo mkfs.ext4 -F -d "$bootstrap_dir/root" "$bootstrap_dir/bootstrap.raw" 1G
-pichi import raw "$bootstrap_dir/bootstrap.raw" -t ghcr.io/pichi-vm/fedora:43
-```
-
-Then run the same `pichi build` command from the Build section, using this
-cached input instead of pulling it. Build once on each native architecture
-and export each result with `pichi save ghcr.io/pichi-vm/fedora:43 -o oci-amd64`
-or `-o oci-arm64`. Copy both layouts to the publishing host. With GHCR write
-authentication configured:
-
-```sh
-pichi load oci-amd64 --tag fedora:43-amd64
-pichi load oci-arm64 --tag fedora:43-arm64
-pichi manifest create fedora:43 fedora:43-amd64 fedora:43-arm64
-pichi manifest annotate fedora:43 fedora:43-amd64 --os pichi --arch amd64
-pichi manifest annotate fedora:43 fedora:43-arm64 --os pichi --arch arm64
-pichi manifest push fedora:43 ghcr.io/pichi-vm/fedora:43
-```
-
-## CI
-
-CI checks Conventional Commit messages, installs Pichi from the PPA,
-pulls the existing Fedora image, and builds the new image **once per
-architecture**. It has no bootstrap
-fallback: if the registry has no prior image, perform the local procedure
-above first. Both builds transfer their images as workflow artifacts.
-Only main publishes the combined multi-architecture index after commit checking
-and both builds succeed; PRs build without publishing.
+Both builds transfer their outputs as workflow artifacts. Only main publishes
+the combined multi-architecture index after commit checking and both builds
+succeed; PRs build without publishing.
 
 The recipe marks its tool input `!bootstrap`, so it needs no `pichi.lock`.
 The output manifest has `dev.pichi.build.bootstrapped=true`, identifying the
