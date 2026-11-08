@@ -14,6 +14,7 @@ stages:
               filesystem systemd systemd-udev kernel-core kernel-modules \
               bash coreutils dnf glibc-minimal-langpack ca-certificates libbpf
           network: true
+      - copy: { path: files, into: /mnt }
   firmware:
     extend: rootfs
     steps:
