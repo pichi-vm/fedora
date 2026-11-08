@@ -87,6 +87,28 @@ active target guarantees DNS, Internet access, or continued connectivity.
 
 See systemd's [network synchronization documentation](https://systemd.io/NETWORK_ONLINE/).
 
+## Optional PC-speaker exclusion
+
+For a headless workload that does not need the PC speaker, add this to its
+existing image boot configuration:
+
+```yaml
+image:
+  boot:
+    extend:
+      kernel.modprobe.blacklist: snd_pcsp
+```
+
+The tested Fedora 43 x86 kernel resolves the `platform:pcspkr` device alias
+to `snd_pcsp`. This setting prevents its normal udev autoload; the platform
+device can still exist without a bound driver. It does not remove the module
+or prohibit an explicit load. Leave the setting out when the workload needs
+the speaker; the general-purpose base image keeps its default behavior.
+
+After replacing the kernel, check `modprobe -R platform:pcspkr`
+again rather than assuming the driver name. See [modprobe's command-line
+blacklist documentation](https://man7.org/linux/man-pages/man8/modprobe.8.html).
+
 ## CI and bootstrap
 
 [CI](.github/workflows/ci.yml) checks commit messages and builds the new image
