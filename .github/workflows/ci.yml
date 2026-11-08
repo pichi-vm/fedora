@@ -114,6 +114,26 @@ jobs:
           test "$status" -eq 124
           grep -q ' login:' cold-boot.log
 
+          sed -i 's/use: !bootstrap /use: /' pichi.yaml
+          pichi update . --pull=never
+          git add pichi.yaml pichi.lock
+          git -c user.name=Qualification -c user.email=qualification@example.invalid \
+            commit -m 'test: lock the cold-start input'
+          git rev-parse HEAD
+          cat pichi.lock
+          pichi build . --ref HEAD --memory 8192 \
+            -t qualification.local/fedora:successor
+          pichi inspect qualification.local/fedora:successor | tee locked-image.json |
+            jq -e '.manifest.annotations | has("dev.pichi.build.bootstrapped") | not'
+          cat locked-image.json
+          status=0
+          timeout --signal=INT --kill-after=10s 60s \
+            pichi run qualification.local/fedora:successor > locked-boot.log 2>&1 || status=$?
+          cat locked-boot.log
+          pichi stop --time 0 "$(head -n 1 locked-boot.log)"
+          test "$status" -eq 124
+          grep -q ' login:' locked-boot.log
+
       - name: ⬆️ Upload image
         uses: actions/upload-artifact@v4
         with:
