@@ -62,6 +62,19 @@ The output manifest has `dev.pichi.build.bootstrapped=true`, identifying the
 unlocked input boundary. Pichi resolves the cached input before replacing its
 tag, so the produced image can serve as the next build's tool image.
 
+## Instance identity
+
+The base image ships an empty `/etc/machine-id` and no D-Bus machine ID.
+Systemd generates an ID on first boot, and tmpfiles copies it to the regular
+file `/var/lib/dbus/machine-id` if that file is absent. When persistent `/var`
+is mounted before systemd starts, later boots reuse that saved ID. Each fresh
+state volume gets its own identity; copying a state volume also copies its ID.
+
+Persistence requires an image configured for persistent `/var` and a retained
+backing disk, selected with `pichi run --storage-file`. Retaining a disk alone
+does not change an image's mount policy. With volatile `/var`, the
+saved file disappears with the guest and the next launch gets a fresh ID.
+
 ## Trademark
 
 Built from Fedora packages; redistributed under the Fedora Project's
