@@ -6,10 +6,6 @@ version: 1
 stages:
   rootfs:
     use: !bootstrap ghcr.io/pichi-vm/fedora:43
-    mounts:
-      /run: tmpfs
-      /tmp: tmpfs
-      /var: tmpfs
     steps:
       - exec:
           command: |
@@ -20,10 +16,6 @@ stages:
           network: true
   firmware:
     extend: rootfs
-    mounts:
-      /run: tmpfs
-      /tmp: tmpfs
-      /var: tmpfs
     steps:
       - copy: { path: pichi.repo, into: /etc/yum.repos.d/pichi.repo }
       - exec:
