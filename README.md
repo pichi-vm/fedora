@@ -109,6 +109,34 @@ After replacing the kernel, check `modprobe -R platform:pcspkr`
 again rather than assuming the driver name. See [modprobe's command-line
 blacklist documentation](https://man7.org/linux/man-pages/man8/modprobe.8.html).
 
+## Optional tty1 getty exclusion
+
+The base image statically enables `getty@tty1.service`. Setting
+`kernel.systemd.getty_auto: "no"` disables automatic getty generation but
+does not remove that enablement.
+
+For a headless derivative, add this step to a stage extending the Fedora
+image, after any package installation or preset application:
+
+```yaml
+- exec:
+    command: systemctl --root=/ disable getty@tty1.service
+```
+
+Also set this under its existing `image.boot.extend` configuration if it
+does not need automatically generated login consoles:
+
+```yaml
+kernel.systemd.getty_auto: "no"
+```
+
+This removes the static tty1 startup request while preserving the console
+device for workload output. It does not disable other explicitly enabled
+login services. Keep an intentional login console enabled for derivatives
+that require interactive recovery, and inspect their enabled units after
+applying presets. The general-purpose base keeps its default login policy.
+See [systemd-getty-generator](https://www.freedesktop.org/software/systemd/man/latest/systemd-getty-generator.html).
+
 ## CI and bootstrap
 
 [CI](.github/workflows/ci.yml) checks commit messages and builds the new image
