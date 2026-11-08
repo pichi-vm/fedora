@@ -24,7 +24,6 @@ permissions:
 
 env:
   RELEASE: "43"
-  BUILD_IMAGE: "ghcr.io/pichi-vm/conglobate@sha256:4a80386aee6536463e234643086ed0c5768affc8947d5037e05f8351c639c0b5"
 
 jobs:
   commit-messages:
@@ -118,7 +117,7 @@ jobs:
             pichi import raw "$bootstrap/bootstrap.raw" --arch "${{ matrix.arch }}" -t "$image:$RELEASE"
           fi
 
-          pichi build . --ref HEAD --build-image "$BUILD_IMAGE" --memory 8192 \
+          pichi build . --ref HEAD --memory 8192 \
             -t "ghcr.io/pichi-vm/fedora:$RELEASE"
 
           pichi save "ghcr.io/pichi-vm/fedora:$RELEASE" -o "oci-${{ matrix.arch }}"
