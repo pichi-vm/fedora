@@ -28,23 +28,6 @@ Arma selects the required kernel modules and constructs the initramfs. The
 package-install stages mount `/run`, `/tmp` and `/var` as tmpfs so their
 transient state is not included in the image.
 
-## Service policy for ephemeral workloads
-
-The base retains Fedora's general-purpose service presets. A short-lived
-derivative that does not need background package-cache updates or periodic
-filesystem discard can disable those timers in a stage extending this image,
-after package installation and preset application:
-
-```yaml
-- exec:
-    command: systemctl --root=/ disable dnf-makecache.timer fstrim.timer
-```
-
-This opts out of scheduled maintenance; it does not remove DNF, filesystem
-tools, or their services. Keep the timers where useful for long-lived guests
-or persistent storage. Check the enabled-unit inventory again if subsequent
-package installation reapplies presets.
-
 ## CI and bootstrap
 
 [CI](.github/workflows/ci.yml) checks commit messages and builds the new image
