@@ -60,6 +60,33 @@ Choose a different name for each instance. This works with read-only `/etc`
 and takes precedence over a baked hostname; it does not configure networking
 or DNS. See systemd's [hostname semantics](https://www.freedesktop.org/software/systemd/man/258/hostname.html).
 
+## Network readiness
+
+The shutdown-only demo needs no network device or wait-online service.
+Reaching `network-online.target` alone does not prove connectivity.
+
+For a networking workload, provide a virtual NIC, configure its guest
+interface, and enable a network manager with its matching wait-online
+service. For example, `systemd-networkd` uses
+`systemd-networkd-wait-online.service`; configure which interfaces and
+address families must be ready. A service that needs this startup ordering
+can include:
+
+```ini
+[Unit]
+Wants=network-online.target
+After=network-online.target
+```
+
+This waits for the configured readiness check to finish, but a failed or
+timed-out check can still leave the target active and the workload running.
+If failure must prevent startup, require and order after the relevant
+readiness service itself. Applications must also handle connection failures
+and retry their actual destination: neither a configured address nor an
+active target guarantees DNS, Internet access, or continued connectivity.
+
+See systemd's [network synchronization documentation](https://systemd.io/NETWORK_ONLINE/).
+
 ## CI and bootstrap
 
 [CI](.github/workflows/ci.yml) checks commit messages and builds the new image
