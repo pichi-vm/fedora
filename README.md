@@ -45,6 +45,21 @@ tools, or their services. Keep the timers where useful for long-lived guests
 or persistent storage. Check the enabled-unit inventory again if subsequent
 package installation reapplies presets.
 
+## Instance hostname
+
+The base image leaves `/etc/hostname` unset. Fedora's `fedora` fallback and
+systemd's "No hostname configured" message are normal when no name is supplied.
+For a named instance, set the `systemd.hostname` kernel parameter. In a derived
+image recipe, add its boot extension under `image.boot.extend`:
+
+```yaml
+kernel.systemd.hostname: worker-01
+```
+
+Choose a different name for each instance. This works with read-only `/etc`
+and takes precedence over a baked hostname; it does not configure networking
+or DNS. See systemd's [hostname semantics](https://www.freedesktop.org/software/systemd/man/258/hostname.html).
+
 ## CI and bootstrap
 
 [CI](.github/workflows/ci.yml) checks commit messages and builds the new image
