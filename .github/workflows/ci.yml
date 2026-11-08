@@ -77,36 +77,23 @@ jobs:
           sudo add-apt-repository --yes ppa:nmccallum/pichi
           sudo apt-get install -y pichi
 
-      - name: 🔨 Build and save Fedora
+      - name: Boot published Fedora
         env:
           XDG_DATA_HOME: ${{ runner.temp }}/fedora-image-cache
         run: |
-          if ! pichi pull "ghcr.io/pichi-vm/fedora:$RELEASE"; then
-            sudo apt-get install -y dnf rpm e2fsprogs
-            bootstrap=$(mktemp -d "$RUNNER_TEMP/bootstrap.XXXXXX")
-            trap 'sudo rm -rf "$bootstrap"' EXIT
-            sudo dnf -y --installroot="$bootstrap/root" --releasever="$RELEASE" \
-              --repofrompath=fedora,https://dl.fedoraproject.org/pub/fedora/linux/releases/$RELEASE/Everything/$(uname -m)/os/ \
-              --repo=fedora --setopt=fedora.gpgkey=https://fedoraproject.org/fedora.gpg \
-              --setopt=gpgcheck=1 --setopt=install_weak_deps=False install \
-              filesystem bash coreutils dnf glibc-minimal-langpack ca-certificates
-            sudo dnf --installroot="$bootstrap/root" --releasever="$RELEASE" clean all
-            sudo mkfs.ext4 -F -E lazy_itable_init=0 \
-              -d "$bootstrap/root" "$bootstrap/bootstrap.raw" 1G
-            pichi import raw "$bootstrap/bootstrap.raw" --arch "${{ matrix.arch }}" \
-              -t "ghcr.io/pichi-vm/fedora:$RELEASE"
-          fi
-
-          pichi build . --ref HEAD --memory 8192 \
-            -t "ghcr.io/pichi-vm/fedora:$RELEASE"
-
-          pichi save "ghcr.io/pichi-vm/fedora:$RELEASE" -o "oci-${{ matrix.arch }}"
-
-      - name: ⬆️ Upload image
-        uses: actions/upload-artifact@v4
-        with:
-          name: oci-${{ matrix.arch }}
-          path: oci-${{ matrix.arch }}
+          test ! -e "$XDG_DATA_HOME"
+          image=ghcr.io/pichi-vm/fedora@sha256:755b0a925eff9c7c0284133361614eea91b9c1ffd8a4ca1fb0e3ec7ce661eeb0
+          pichi pull "$image"
+          pichi inspect "$image" | tee published-image.json |
+            jq -e '.manifest.annotations["dev.pichi.build.commit"] == "sha1:44ec823fe4b676a3f04d3d6530482a377e6dd64d"'
+          cat published-image.json
+          status=0
+          timeout --signal=INT --kill-after=10s 60s \
+            pichi run "$image" > published-boot.log 2>&1 || status=$?
+          cat published-boot.log
+          pichi stop --time 0 "$(head -n 1 published-boot.log)"
+          test "$status" -eq 124
+          grep -q ' login:' published-boot.log
 
   publish:
     name: Publish
