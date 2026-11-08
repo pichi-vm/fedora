@@ -137,6 +137,19 @@ that require interactive recovery, and inspect their enabled units after
 applying presets. The general-purpose base keeps its default login policy.
 See [systemd-getty-generator](https://www.freedesktop.org/software/systemd/man/latest/systemd-getty-generator.html).
 
+## Instance identity
+
+The base image ships an empty `/etc/machine-id` and no D-Bus machine ID.
+Systemd generates an ID on first boot, and tmpfiles copies it to the regular
+file `/var/lib/dbus/machine-id` if that file is absent. When persistent `/var`
+is mounted before systemd starts, later boots reuse that saved ID. Each fresh
+state volume gets its own identity; copying a state volume also copies its ID.
+
+Persistence requires an image configured for persistent `/var` and a retained
+backing disk, selected with `pichi run --storage-file`. Retaining a disk alone
+does not change an image's mount policy. With volatile `/var`, the
+saved file disappears with the guest and the next launch gets a fresh ID.
+
 ## CI and bootstrap
 
 [CI](.github/workflows/ci.yml) checks commit messages and builds the new image
