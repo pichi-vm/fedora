@@ -4,6 +4,18 @@ Fedora 43 base image for Pichi, built by [`pichi.yaml`](pichi.yaml). It combines
 an ext4 carapace, an Arma-produced PMI with Corium as its initramfs, and the
 requirements for booting Fedora with `pichi run`.
 
+## Hostname configuration
+
+For a derived image with read-only `/etc`, set the hostname under
+`image.boot.extend`:
+
+```yaml
+kernel.systemd.hostname: worker-01
+```
+
+Every instance of that image receives this name. This sets the guest hostname;
+it does not configure DNS. See [systemd's hostname documentation](https://www.freedesktop.org/software/systemd/man/258/hostname.html).
+
 ## Build
 
 Use a native Linux/KVM host with the `pichi` package (which depends on
