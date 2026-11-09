@@ -12,7 +12,7 @@ stages:
             dnf -y --installroot=/mnt --use-host-config --releasever=43 \
               --setopt=install_weak_deps=False install \
               filesystem systemd systemd-udev kernel-core kernel-modules \
-              bash coreutils dnf glibc-minimal-langpack ca-certificates libbpf e2fsprogs
+              bash coreutils dnf glibc-minimal-langpack ca-certificates libbpf e2fsprogs wireless-regdb
             systemd-tmpfiles --root=/mnt --create --boot \
               --prefix=/etc/locale.conf --prefix=/etc/vconsole.conf
             install -m0444 /dev/null /mnt/etc/machine-id
