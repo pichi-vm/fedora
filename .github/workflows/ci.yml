@@ -97,7 +97,7 @@ jobs:
               -t "ghcr.io/pichi-vm/fedora:$RELEASE"
           fi
 
-          pichi build . --ref HEAD --memory 8192 \
+          pichi build . --ref HEAD --memory 8192m \
             -t "ghcr.io/pichi-vm/fedora:$RELEASE"
 
           pichi save "ghcr.io/pichi-vm/fedora:$RELEASE" -o "oci-${{ matrix.arch }}"
